@@ -8,7 +8,7 @@ final class DemoMusic: MusicService {
     private(set) var nowPlaying: NowPlaying?
     var onNotice: ((Notice) -> Void)?
 
-    private let playlists: [Playlist]
+    private var playlists: [Playlist]
     private var tracksByPlaylist: [String: [Track]] = [:]
     /// Album id → artist name, so an album page credits the right artist.
     private var albumArtists: [String: String] = [:]
@@ -41,7 +41,12 @@ final class DemoMusic: MusicService {
     }
 
     func loadPlaylists() async throws -> [Playlist] {
-        try await Task.sleep(for: .milliseconds(250))
+        var delay = Duration.milliseconds(250)
+        #if DEBUG
+        // `run-on-iphone.sh --loader`: hold the loader on screen to look at it.
+        if ProcessInfo.processInfo.arguments.contains("-slowLoad") { delay = .seconds(6) }
+        #endif
+        try await Task.sleep(for: delay)
         return playlists
     }
 
@@ -59,7 +64,7 @@ final class DemoMusic: MusicService {
         var seen = Set<String>()
         let unique = tracks.filter { seen.insert($0.name).inserted }
         let artists = Set(unique.map(\.artists)).sorted().prefix(4).enumerated().map { index, name in
-            CatalogItem(id: "artist-\(name)", kind: .artist, name: name, subtitle: "Artist", uri: "demo:artist:\(name)", demoSeed: index * 13 + 5)
+            Self.artist(named: name)
         }
         let lists = playlists.filter { $0.name.lowercased().contains(needle) }.map {
             CatalogItem(id: $0.id, kind: .playlist, name: $0.name, subtitle: $0.ownerName, uri: $0.uri, demoSeed: $0.demoSeed)
@@ -72,6 +77,11 @@ final class DemoMusic: MusicService {
         let all = Array(tracksByPlaylist.values.joined())
         let added = trackURIs.compactMap { uri in all.first { $0.uri == uri } }
         tracksByPlaylist[playlist.id, default: []] += added
+    }
+
+    func deletePlaylist(_ playlist: Playlist) async throws {
+        try await Task.sleep(for: .milliseconds(200))
+        playlists.removeAll { $0.id == playlist.id }
     }
 
     func remove(_ trackURIs: [String], from playlist: Playlist) async throws {
@@ -110,8 +120,7 @@ final class DemoMusic: MusicService {
                          artists: artistName, album: album.name, imageURL: nil, durationMs: 150_000 + (n * 7919) % 120_000,
                          uri: "demo:track:\(album.id):\(i)", demoSeed: album.demoSeed, number: i + 1)
         }
-        let artist = CatalogItem(id: "artist-\(artistName)", kind: .artist, name: artistName, subtitle: "Artist",
-                                 uri: "demo:artist:\(artistName)", demoSeed: 9)
+        let artist = Self.artist(named: artistName)
         tracksByPlaylist[album.uri] = tracks
         return AlbumPage(album: album, artists: [artist], year: "2025", tracks: tracks)
     }
@@ -149,9 +158,8 @@ final class DemoMusic: MusicService {
             if let first = playlists.first { play(.context(uri: first.uri)) }
             return
         }
-        state.positionMs = state.position(at: Date())
+        state.rebase()
         state.isPaused.toggle()
-        state.updatedAt = Date()
         nowPlaying = state
     }
 
@@ -182,7 +190,8 @@ final class DemoMusic: MusicService {
         nowPlaying = NowPlaying(
             title: track.name, artist: track.artists, album: track.album,
             artwork: Artwork(url: nil, seed: track.demoSeed), trackURI: track.uri, contextURI: context,
-            isPaused: false, positionMs: 0, durationMs: track.durationMs, updatedAt: Date()
+            isPaused: false, positionMs: 0, durationMs: track.durationMs, updatedAt: Date(),
+            artistItem: Self.artist(named: track.artists)
         )
         clock?.cancel()
         clock = Task { [weak self] in
@@ -192,6 +201,13 @@ final class DemoMusic: MusicService {
                 if !state.isPaused, state.position(at: Date()) >= state.durationMs { self.step(1) }
             }
         }
+    }
+
+    /// One preview artist per name, with a stable generated photo.
+    static func artist(named name: String) -> CatalogItem {
+        let seed = name.unicodeScalars.reduce(0) { $0 + Int($1.value) } % 40
+        return CatalogItem(id: "artist-\(name)", kind: .artist, name: name, subtitle: "Artist",
+                           uri: "demo:artist:\(name)", demoSeed: seed)
     }
 
     private static let words = ["Glass", "Harbor", "Velvet", "Static", "Morning", "Copper", "Lantern", "Willow",

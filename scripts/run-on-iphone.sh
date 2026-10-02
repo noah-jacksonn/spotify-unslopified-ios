@@ -12,6 +12,7 @@
 #   scripts/run-on-iphone.sh --play          start the first Home playlist (mini player)
 #   scripts/run-on-iphone.sh --artist        open the first artist a search finds
 #   scripts/run-on-iphone.sh --album         open that artist's first album
+#   scripts/run-on-iphone.sh --loader        preview mode, holding Home's loader for 6 s
 #   scripts/run-on-iphone.sh --now-playing   open the full player (starts music)
 #   scripts/run-on-iphone.sh --console       stream stdout/stderr (combinable)
 #
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
     --play) APP_ARGS+=(-autoplay) ;;
     --artist) APP_ARGS+=(-openArtist) ;;
     --album) APP_ARGS+=(-openAlbum) ;;
+    --loader) APP_ARGS+=(-preview -slowLoad) ;;
     --now-playing) APP_ARGS+=(-openNowPlaying) ;;
     *) echo "✗ Unknown option: $1" >&2; exit 1 ;;
   esac

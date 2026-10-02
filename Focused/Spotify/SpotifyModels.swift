@@ -4,12 +4,17 @@ struct Playlist: Identifiable, Hashable {
     var id: String
     var name: String
     var ownerName: String
+    /// Editable by the user: owned, or collaborative.
     var isMine: Bool
+    /// Owned by the user, so removing it from the library deletes it.
+    var isOwned: Bool { isMine && !isCollaborativeGuest }
     var imageURL: URL?
     var trackCount: Int?
     var uri: String
     /// Sample-music preview only: seeds the generated cover.
     var demoSeed: Int?
+    /// Someone else's collaborative playlist the user can edit.
+    var isCollaborativeGuest = false
 }
 
 struct Track: Identifiable, Hashable {
@@ -92,14 +97,48 @@ struct NowPlaying: Equatable {
     var durationMs: Int
     /// When `positionMs` was true; progress is extrapolated from here.
     var updatedAt: Date
+    var speed: Double = 1
+    /// The (first) artist, so the full player can open their page.
+    var artistItem: CatalogItem? = nil
+
+    /// Spoken content (a podcast episode or audiobook chapter), which unlike
+    /// music has a playback speed.
+    var isEpisode: Bool { Self.isSpoken(uri: trackURI) }
+
+    /// Pins the extrapolated position to `date`, before changing pause or
+    /// speed (which change how it extrapolates from here on).
+    mutating func rebase(at date: Date = Date()) {
+        positionMs = position(at: date)
+        updatedAt = date
+    }
 
     func position(at date: Date) -> Int {
         guard !isPaused else { return positionMs }
-        let elapsed = Int(date.timeIntervalSince(updatedAt) * 1000)
+        let elapsed = Int(date.timeIntervalSince(updatedAt) * 1000 * speed)
         return min(durationMs, positionMs + max(0, elapsed))
     }
 
     func progress(at date: Date) -> Double {
         durationMs > 0 ? Double(position(at: date)) / Double(durationMs) : 0
+    }
+}
+
+extension CatalogItem {
+    /// A Spotify artist, from their id or `spotify:artist:` URI.
+    static func spotifyArtist(id: String, name: String, imageURL: URL? = nil) -> CatalogItem {
+        CatalogItem(id: id, kind: .artist, name: name, subtitle: "Artist", imageURL: imageURL, uri: "spotify:artist:\(id)")
+    }
+
+    static func spotifyArtist(uri: String, name: String) -> CatalogItem? {
+        let prefix = "spotify:artist:"
+        guard uri.hasPrefix(prefix) else { return nil }
+        return spotifyArtist(id: String(uri.dropFirst(prefix.count)), name: name)
+    }
+}
+
+extension NowPlaying {
+    /// Spotify URI kinds that are spoken content, whatever the SDK flags say.
+    static func isSpoken(uri: String) -> Bool {
+        uri.hasPrefix("spotify:episode:") || uri.hasPrefix("spotify:chapter:")
     }
 }

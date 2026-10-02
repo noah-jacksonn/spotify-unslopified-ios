@@ -57,6 +57,13 @@ struct SpotifyAPI {
         }
     }
 
+    /// Removes items (here, playlists) from the user's library. For a
+    /// playlist the user owns this is Spotify's "Delete"; Spotify keeps it
+    /// restorable from the account page for 90 days.
+    func removeFromLibrary(_ uris: [String]) async throws {
+        try await send("DELETE", "me/library", [.init(name: "uris", value: uris.joined(separator: ","))])
+    }
+
     /// Appends to the end of a playlist the user owns or collaborates on.
     func addItems(_ uris: [String], toPlaylist id: String) async throws {
         try await send("POST", "playlists/\(id)/items", json: ["uris": uris])
@@ -130,9 +137,7 @@ struct SpotifyAPI {
         // Album tracks come without album info; fill it from the album.
         let image = album.images?.bestURL
         tracks = tracks.map { var track = $0; track.imageURL = image; track.album = album.name; return track }
-        let artists = (album.artists ?? []).compactMap { artist in
-            artist.id.map { CatalogItem(id: $0, kind: .artist, name: artist.name, subtitle: "Artist", uri: "spotify:artist:\($0)") }
-        }
+        let artists = (album.artists ?? []).compactMap { artist in artist.id.map { CatalogItem.spotifyArtist(id: $0, name: artist.name) } }
         return AlbumPage(
             album: CatalogItem(id: album.id, kind: .album, name: album.name,
                                subtitle: artists.map(\.name).joined(separator: ", "), imageURL: image, uri: album.uri),
@@ -160,8 +165,9 @@ struct SpotifyAPI {
     /// Starts `contextURI` or `uris`. The start track is an exact `offsetPosition`
     /// when known, else `offsetURI`.
     func play(contextURI: String?, offsetURI: String? = nil, offsetPosition: Int? = nil,
-              uris: [String]? = nil, deviceID: String? = nil) async throws {
+              uris: [String]? = nil, positionMs: Int? = nil, deviceID: String? = nil) async throws {
         var body: [String: Any] = [:]
+        if let positionMs { body["position_ms"] = positionMs }
         if let contextURI { body["context_uri"] = contextURI }
         if let offsetPosition {
             body["offset"] = ["position": offsetPosition]
@@ -200,7 +206,8 @@ struct SpotifyAPI {
             isPaused: !state.is_playing,
             positionMs: state.progress_ms ?? 0,
             durationMs: item.duration_ms ?? 0,
-            updatedAt: Date()
+            updatedAt: Date(),
+            artistItem: item.artists?.first.flatMap { artist in artist.id.map { .spotifyArtist(id: $0, name: artist.name) } }
         )
     }
 
@@ -323,7 +330,8 @@ private struct PlaylistDTO: Decodable {
             isMine: owner.id == myID || collaborative == true,
             imageURL: images?.bestURL,
             trackCount: items?.total ?? tracks?.total,
-            uri: uri
+            uri: uri,
+            isCollaborativeGuest: owner.id != myID && collaborative == true
         )
     }
 
@@ -401,7 +409,7 @@ private struct ArtistDTO: Decodable {
     var images: [ImageDTO]?
 
     var model: CatalogItem {
-        CatalogItem(id: id, kind: .artist, name: name, subtitle: "Artist", imageURL: images?.bestURL, uri: uri)
+        .spotifyArtist(id: id, name: name, imageURL: images?.bestURL)
     }
 }
 

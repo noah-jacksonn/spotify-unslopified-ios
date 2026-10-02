@@ -109,6 +109,10 @@ struct HomeView: View {
 
     private var isPlaying: Bool { model.music?.nowPlaying.map { !$0.isPaused } ?? false }
 
+    private var isLoading: Bool {
+        model.playlists.isEmpty && (model.libraryState == .idle || model.libraryState == .loading)
+    }
+
     private var accountMenu: some View {
         Menu {
             if model.mode == .preview {
@@ -131,22 +135,18 @@ struct HomeView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch model.libraryState {
-        case .idle, .loading:
-            ProgressView()
-                .tint(look.palette.muted)
-                .frame(maxWidth: .infinity, minHeight: 240)
-        case .failed(let message):
+        if isLoading {
+            // Only before anything has loaded; a refresh keeps the list up.
+            HomeLoadingView()
+        } else if case .failed(let message) = model.libraryState {
             emptyState(title: "Couldn't load your playlists", detail: message, action: "Try again") {
                 Task { await model.loadLibrary() }
             }
-        default:
-            if model.homePlaylists.isEmpty {
-                emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
-                           action: "Choose playlists") { showsLibrary = true }
-            } else {
-                PlaylistList(playlists: model.homePlaylists)
-            }
+        } else if model.homePlaylists.isEmpty {
+            emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
+                       action: "Choose playlists") { showsLibrary = true }
+        } else {
+            PlaylistList(playlists: model.homePlaylists)
         }
     }
 
@@ -191,6 +191,7 @@ private struct PlaylistList: View {
     var playlists: [Playlist]
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
+    @State private var deleting: Playlist?
 
     var body: some View {
         VStack(spacing: look.gap) {
@@ -202,10 +203,14 @@ private struct PlaylistList: View {
                 .contextMenu {
                     Button("Play", systemImage: "play.fill") { model.music?.play(.context(uri: playlist.uri)) }
                     Button("Move to top", systemImage: "arrow.up.to.line") { model.home.moveToTop(playlist) }
-                    Button("Remove from Home", systemImage: "minus.circle", role: .destructive) { model.home.remove(playlist) }
+                    Button("Remove from Home", systemImage: "minus.circle") { model.home.remove(playlist) }
+                    Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
+                        deleting = playlist
+                    }
                 }
             }
         }
+        .deletePlaylistConfirmation($deleting)
         .padding(.horizontal, look.margin)
     }
 
@@ -235,5 +240,27 @@ private struct PlaylistList: View {
             }
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Home's loader: the app's three bars, small and muted, moving where the
+/// list will appear. Fades in only after a short wait, so a quick load
+/// shows nothing (Noah, 2026-10-03: full-screen placeholder rows were too
+/// much; he wanted something smaller and more subtle).
+private struct HomeLoadingView: View {
+    @Environment(\.look) private var look
+    @State private var visible = false
+
+    var body: some View {
+        BarsMark(color: look.palette.muted.opacity(0.6), size: 22, playing: visible)
+            .frame(maxWidth: .infinity, minHeight: 220)
+            .opacity(visible ? 1 : 0)
+            .animation(look.animation, value: visible)
+            .task {
+                try? await Task.sleep(for: .milliseconds(400))
+                visible = true
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Loading your playlists")
     }
 }

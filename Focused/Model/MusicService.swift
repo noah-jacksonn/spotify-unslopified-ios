@@ -8,10 +8,13 @@ enum PlayRequest: Equatable {
     case context(uri: String, startAt: String? = nil, position: Int? = nil)
     case tracks([String])
 
-    /// What App Remote or a wake can start: the context, or the first track.
+    /// What App Remote or a wake starts right away: the chosen song when
+    /// there is one (so the right song is heard first), else the context,
+    /// else the first track. `SpotifyMusic.jumpToStart` then attaches the
+    /// rest of the context.
     var startURI: String {
         switch self {
-        case let .context(uri, _, _): uri
+        case let .context(uri, startAt, _): startAt ?? uri
         case let .tracks(uris): uris.first ?? ""
         }
     }
@@ -46,6 +49,8 @@ protocol MusicService: AnyObject {
     func artistPage(_ artist: CatalogItem) async throws -> ArtistPage
     func albumPage(_ album: CatalogItem) async throws -> AlbumPage
     func add(_ trackURIs: [String], to playlist: Playlist) async throws
+    /// Removes the playlist from the library (deletes it, if it's yours).
+    func deletePlaylist(_ playlist: Playlist) async throws
     /// Removes every copy of each song.
     func remove(_ trackURIs: [String], from playlist: Playlist) async throws
 
@@ -59,8 +64,19 @@ protocol MusicService: AnyObject {
     func previous()
     func seek(toMs position: Int)
 
+    /// Podcast speeds Spotify offers (empty when it can't be changed: speed
+    /// goes through App Remote, so only while connected to the Spotify app).
+    var podcastSpeeds: [Double] { get }
+    func setPodcastSpeed(_ value: Double)
+
     func appBecameActive()
     func appWillResignActive()
     /// Handles a callback URL; ignores ones that aren't for this service.
     func handle(url: URL)
+}
+
+extension MusicService {
+    /// No speed control unless a service provides one (the preview doesn't).
+    var podcastSpeeds: [Double] { [] }
+    func setPodcastSpeed(_ value: Double) {}
 }

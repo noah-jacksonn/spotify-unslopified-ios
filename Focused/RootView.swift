@@ -67,25 +67,12 @@ struct MainView: View {
             HomeView(showsLibrary: $showsLibrary)
                 .appDestinations()
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let music = model.music, let state = music.nowPlaying {
-                MiniPlayer(state: state, music: music) { showsNowPlaying = true }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(look.animation, value: model.music?.nowPlaying == nil)
+        .playerBar(isCovered: showsLibrary, showsFullPlayer: $showsNowPlaying)
         .noticeOverlay()
         .sheet(isPresented: $showsLibrary) {
             LibrarySheet()
                 .environment(\.look, look)
                 .noticeOverlay()
-        }
-        .sheet(isPresented: $showsNowPlaying) {
-            if let music = model.music {
-                NowPlayingSheet(music: music)
-                    .environment(\.look, look)
-                    .noticeOverlay()
-            }
         }
         .task(id: model.mode) {
             await model.loadLibrary()
@@ -133,16 +120,52 @@ struct MainView: View {
 
 extension View {
     /// Every destination a navigation stack in the app can push. Applied to
-    /// each stack (Home's and the library sheet's) so they stay in step.
+    /// each stack so they stay in step.
     func appDestinations() -> some View {
         navigationDestination(for: Playlist.self) { PlaylistView(playlist: $0) }
             .navigationDestination(for: CatalogItem.self) { CatalogPage(item: $0) }
+    }
+
+    /// The mini player docked at the bottom, opening the full player. On
+    /// the main screen and inside the library sheet, which would otherwise
+    /// cover it. `isCovered` skips drawing a bar a sheet is hiding;
+    /// `showsFullPlayer` lets a caller open the player itself.
+    func playerBar(isCovered: Bool = false, showsFullPlayer: Binding<Bool>? = nil) -> some View {
+        modifier(PlayerBar(isCovered: isCovered, external: showsFullPlayer))
     }
 
     /// The app's notice capsule. Applied to the main screen and to each
     /// sheet, so a message is never hidden behind a sheet.
     func noticeOverlay() -> some View {
         modifier(NoticeOverlay())
+    }
+}
+
+private struct PlayerBar: ViewModifier {
+    var isCovered: Bool
+    var external: Binding<Bool>?
+    @State private var showsOwn = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.look) private var look
+
+    private var showsFullPlayer: Binding<Bool> { external ?? $showsOwn }
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !isCovered, let music = model.music, let state = music.nowPlaying {
+                    MiniPlayer(state: state, music: music) { showsFullPlayer.wrappedValue = true }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(look.animation, value: model.music?.nowPlaying == nil)
+            .sheet(isPresented: showsFullPlayer) {
+                if let music = model.music {
+                    NowPlayingSheet(music: music)
+                        .environment(\.look, look)
+                        .noticeOverlay()
+                }
+            }
     }
 }
 

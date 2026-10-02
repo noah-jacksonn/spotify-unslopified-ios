@@ -18,6 +18,9 @@ enum Config {
         "user-library-read",
         "playlist-modify-private",
         "playlist-modify-public",
+        // Deleting a playlist = removing it from the library (DELETE /me/library).
+        "user-library-modify",
+        "user-follow-modify",
         "user-read-playback-state",
         "user-modify-playback-state",
         "user-read-currently-playing",
@@ -26,5 +29,8 @@ enum Config {
 
     /// Scopes added after the first sign-ins; a saved sign-in without them
     /// is asked to sign in again (`SpotifyAuth.hasAllScopes`).
-    static let laterScopes: Set<String> = ["playlist-modify-private", "playlist-modify-public"]
+    static let laterScopes: Set<String> = [
+        "playlist-modify-private", "playlist-modify-public", // 2026-10-02: adding/removing songs
+        "user-library-modify", "user-follow-modify",          // 2026-10-03: deleting playlists
+    ]
 }

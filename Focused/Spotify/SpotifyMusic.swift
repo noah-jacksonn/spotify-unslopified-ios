@@ -45,8 +45,9 @@ final class SpotifyMusic: MusicService {
     /// Callers of `reconnectRemote` waiting on the connection delegate.
     private var connectWaiters: [CheckedContinuation<Bool, Never>] = []
     private var connectAttempt = 0
-    /// Bumped by every play; a slower route still finishing an older play
-    /// checks it before jumping or waking, so a newer tap always wins.
+    /// Bumped by every play and every pause/skip/seek; a slower route still
+    /// finishing an older play checks it before jumping or waking, so the
+    /// user's latest action always wins.
     private var playID = 0
     /// Whether this app turned Spotify's shuffle on. The app has no shuffle
     /// toggle, so the next ordinary play turns it back off.
@@ -54,6 +55,14 @@ final class SpotifyMusic: MusicService {
     /// The image the current track uses, so an App Remote art download
     /// lands on whichever track shows it (often the whole album).
     private var currentImageID: String?
+    /// Web API covers used when App Remote couldn't supply one, by App
+    /// Remote image id, so later songs from the same album reuse them.
+    private var fallbackArt: [String: Artwork] = [:]
+    /// Spotify's podcast speed objects; setting one means passing it back.
+    private var speedOptions: [SPTAppRemotePodcastPlaybackSpeed] = [] {
+        didSet { speedValues = speedOptions.map(\.value.doubleValue) }
+    }
+    private var speedValues: [Double] = []
 
     /// App Remote's player, when connected.
     private var player: SPTAppRemotePlayerAPI? { remote.isConnected ? remote.playerAPI : nil }
@@ -87,6 +96,9 @@ final class SpotifyMusic: MusicService {
     func albumPage(_ album: CatalogItem) async throws -> AlbumPage { try await api.album(album.id) }
     func add(_ trackURIs: [String], to playlist: Playlist) async throws {
         try await api.addItems(trackURIs, toPlaylist: playlist.id)
+    }
+    func deletePlaylist(_ playlist: Playlist) async throws {
+        try await api.removeFromLibrary([playlist.uri])
     }
     func remove(_ trackURIs: [String], from playlist: Playlist) async throws {
         try await api.removeItems(trackURIs, fromPlaylist: playlist.id)
@@ -159,9 +171,14 @@ final class SpotifyMusic: MusicService {
                 refreshSoon()
             } else if await reconnectRemote(), id == playID, let player {
                 log("play via App Remote after a quiet reconnect")
+                let started = Date()
                 player.play(request.startURI) { _, error in
                     guard id == self.playID else { return }
-                    if error != nil { self.wakeSpotify(for: request) } else { self.jumpToStart(of: request, id: id) }
+                    if error != nil {
+                        self.wakeSpotify(for: request)
+                    } else {
+                        self.jumpToStart(of: request, id: id, startedAt: started)
+                    }
                 }
             } else if id == playID {
                 wakeSpotify(for: request)
@@ -169,17 +186,23 @@ final class SpotifyMusic: MusicService {
         }
     }
 
-    /// App Remote and the wake can only start a context from its top. For a
-    /// request that names a song, jump to it over the Web API once the
-    /// phone is the active device; retried once, since that can take a
-    /// moment. Without this the first song of the playlist plays instead.
-    private func jumpToStart(of request: PlayRequest, id: Int) {
+    /// App Remote and the wake can only start one URI. They start the
+    /// chosen song itself (`startURI`), so it's what's heard; this then
+    /// re-plays it inside its playlist or album over the Web API, at the
+    /// spot it has reached, so the following songs come from the context
+    /// and the handover isn't audible (Noah, 2026-10-03: starting the
+    /// context's first song and then jumping was). Retried once, since the
+    /// phone can take a moment to become the active device.
+    private func jumpToStart(of request: PlayRequest, id: Int, startedAt: Date) {
         guard request.singleURI == nil else { return }
         Task {
-            for delay in [Duration.milliseconds(800), .milliseconds(1800)] {
+            // Up to ~10 s: right after a wake the phone can be slow to become
+            // the active device, and until this lands the song plays
+            // outside its playlist.
+            for delay in [Duration.milliseconds(800), .milliseconds(1500), .seconds(3), .seconds(5)] {
                 try? await Task.sleep(for: delay)
                 guard id == playID else { return }
-                if (try? await sendPlay(request)) != nil {
+                if (try? await sendPlay(request, positionMs: heardSoFar(of: request, since: startedAt))) != nil {
                     log("jumped to the chosen song")
                     refreshSoon()
                     return
@@ -187,6 +210,13 @@ final class SpotifyMusic: MusicService {
             }
             log("couldn't jump to the chosen song")
         }
+    }
+
+    /// How far into the chosen song playback is: App Remote's position when
+    /// it reports that song, else the time since it was started.
+    private func heardSoFar(of request: PlayRequest, since startedAt: Date) -> Int {
+        if let state = nowPlaying, state.trackURI == request.startURI { return state.position(at: Date()) }
+        return max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
     }
 
     /// The phone's Spotify, if the Web API lists exactly one phone. With
@@ -228,12 +258,13 @@ final class SpotifyMusic: MusicService {
         for waiter in waiters { waiter.resume(returning: connected) }
     }
 
-    private func sendPlay(_ request: PlayRequest, deviceID: String? = nil) async throws {
+    private func sendPlay(_ request: PlayRequest, positionMs: Int? = nil, deviceID: String? = nil) async throws {
         switch request {
         case let .context(uri, startAt, position):
-            try await api.play(contextURI: uri, offsetURI: startAt, offsetPosition: position, deviceID: deviceID)
+            try await api.play(contextURI: uri, offsetURI: startAt, offsetPosition: position,
+                               positionMs: positionMs, deviceID: deviceID)
         case let .tracks(uris):
-            try await api.play(contextURI: nil, uris: uris, deviceID: deviceID)
+            try await api.play(contextURI: nil, uris: uris, positionMs: positionMs, deviceID: deviceID)
         }
     }
 
@@ -253,15 +284,15 @@ final class SpotifyMusic: MusicService {
     }
 
     func togglePause() {
+        playID += 1
         guard var state = nowPlaying else {
             resumeWithFallbacks()
             return
         }
         let pausing = !state.isPaused
         let before = state
-        state.positionMs = state.position(at: Date())
+        state.rebase()
         state.isPaused = pausing
-        state.updatedAt = Date()
         nowPlaying = state
         if let player {
             if pausing { player.pause(nil) } else { player.resume(nil) }
@@ -294,14 +325,17 @@ final class SpotifyMusic: MusicService {
     }
 
     func next() {
+        playID += 1
         if let player { player.skip(toNext: nil) } else { command { try await $0.next() } }
     }
 
     func previous() {
+        playID += 1
         if let player { player.skip(toPrevious: nil) } else { command { try await $0.previous() } }
     }
 
     func seek(toMs position: Int) {
+        playID += 1
         if var state = nowPlaying {
             state.positionMs = position
             state.updatedAt = Date()
@@ -321,6 +355,29 @@ final class SpotifyMusic: MusicService {
     private func report(_ error: Error) {
         let noDevice = (error as? SpotifyAPI.APIError)?.isNoActiveDevice == true
         onNotice?(Notice(text: error.localizedDescription, opensSpotify: noDevice))
+    }
+
+    // MARK: Podcast speed
+
+    var podcastSpeeds: [Double] { player == nil ? [] : speedValues }
+
+    func setPodcastSpeed(_ value: Double) {
+        guard let player else {
+            onNotice?(Notice(text: "Changing speed needs the Spotify app running.", opensSpotify: true))
+            return
+        }
+        guard let option = speedOptions.first(where: { $0.value.doubleValue == value }) else { return }
+        let before = nowPlaying
+        if var state = nowPlaying {
+            state.rebase()
+            state.speed = value
+            nowPlaying = state
+        }
+        player.setPodcastPlaybackSpeed(option) { [weak self] _, error in
+            guard let self, let error else { return }
+            if let before, self.nowPlaying?.trackURI == before.trackURI { self.nowPlaying?.speed = before.speed }
+            self.report(error)
+        }
     }
 
     // MARK: Lifecycle
@@ -381,9 +438,19 @@ final class SpotifyMusic: MusicService {
         remote.playerAPI?.getPlayerState { [weak self] result, _ in
             if let state = result as? SPTAppRemotePlayerState { self?.apply(state) }
         }
+        // The list is fixed per Spotify install, so it's fetched once.
+        if speedOptions.isEmpty {
+            remote.playerAPI?.getAvailablePodcastPlaybackSpeeds { [weak self] result, _ in
+                self?.speedOptions = result as? [SPTAppRemotePodcastPlaybackSpeed] ?? []
+            }
+        }
+        // A new connection is a fresh chance for covers that failed before.
+        lastImageID = nil
         if let pending = pendingStart {
             pendingStart = nil
-            if pending.at.timeIntervalSinceNow > -60 { jumpToStart(of: pending.request, id: pending.id) }
+            if pending.at.timeIntervalSinceNow > -60 {
+                jumpToStart(of: pending.request, id: pending.id, startedAt: Date())
+            }
         }
     }
 
@@ -405,18 +472,11 @@ final class SpotifyMusic: MusicService {
         if artwork == .none {
             if ImageCache.shared.contains(id: imageID) {
                 artwork = .image(id: imageID)
+            } else if let fallback = fallbackArt[imageID] {
+                artwork = fallback
             } else if lastImageID != imageID {
                 lastImageID = imageID
-                remote.imageAPI?.fetchImage(forItem: track, with: CGSize(width: 640, height: 640)) { [weak self] result, _ in
-                    guard let self else { return }
-                    guard let image = result as? UIImage else {
-                        // Let the next state update try again.
-                        if self.lastImageID == imageID { self.lastImageID = nil }
-                        return
-                    }
-                    ImageCache.shared.store(image, id: imageID)
-                    if self.currentImageID == imageID { self.nowPlaying?.artwork = .image(id: imageID) }
-                }
+                fetchArtwork(for: track, imageID: imageID)
             }
         }
         setNowPlaying(NowPlaying(
@@ -429,8 +489,45 @@ final class SpotifyMusic: MusicService {
             isPaused: state.isPaused,
             positionMs: state.playbackPosition,
             durationMs: Int(track.duration),
-            updatedAt: Date()
+            updatedAt: Date(),
+            // Spotify accepts a speed for songs but plays them at 1× anyway.
+            speed: NowPlaying.isSpoken(uri: track.uri) && state.playbackSpeed > 0 ? Double(state.playbackSpeed) : 1,
+            // Episodes report their show here; only artists have a page.
+            artistItem: .spotifyArtist(uri: track.artist.uri, name: track.artist.name)
         ))
+    }
+
+    /// Cover from App Remote, else the Web API's art for what's playing: on
+    /// 2026-10-03 a song kept a blank cover because one failed App Remote
+    /// fetch (common right after Spotify opens) had no fallback. Tried once
+    /// per image per connection (`lastImageID`).
+    private func fetchArtwork(for track: SPTAppRemoteTrack, imageID: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            if let image = await self.remoteImage(for: track) {
+                // Cached even if the song changed meanwhile, for coming back.
+                ImageCache.shared.store(image, id: imageID)
+                if self.currentImageID == imageID { self.nowPlaying?.artwork = .image(id: imageID) }
+                return
+            }
+            if self.currentImageID == imageID, let state = try? await self.api.playbackState(),
+               state.trackURI == track.uri, state.artwork != .none {
+                self.fallbackArt[imageID] = state.artwork
+                if self.currentImageID == imageID { self.nowPlaying?.artwork = state.artwork }
+            } else if self.lastImageID == imageID {
+                // Both sources failed: let the next state update try again.
+                self.lastImageID = nil
+            }
+        }
+    }
+
+    private func remoteImage(for track: SPTAppRemoteTrack) async -> UIImage? {
+        guard let imageAPI = remote.imageAPI else { return nil }
+        return await withCheckedContinuation { continuation in
+            imageAPI.fetchImage(forItem: track, with: CGSize(width: 640, height: 640)) { result, _ in
+                continuation.resume(returning: result as? UIImage)
+            }
+        }
     }
 
     /// Skips updates that change nothing visible, so every list showing a
@@ -439,7 +536,7 @@ final class SpotifyMusic: MusicService {
     private func setNowPlaying(_ new: NowPlaying?) {
         if let old = nowPlaying, let new,
            old.trackURI == new.trackURI, old.isPaused == new.isPaused, old.contextURI == new.contextURI,
-           old.durationMs == new.durationMs, old.title == new.title,
+           old.durationMs == new.durationMs, old.title == new.title, old.speed == new.speed,
            new.artwork == .none || old.artwork == new.artwork,
            abs(old.position(at: new.updatedAt) - new.positionMs) < 1500 {
             return

@@ -16,6 +16,9 @@ final class AppModel {
     /// cleared after a few seconds.
     private(set) var notice: Notice?
     private var noticeTask: Task<Void, Never>?
+    /// Deleted this session; kept out of library loads that started before
+    /// Spotify caught up.
+    private var deletedIDs: Set<String> = []
 
     init() {
         auth.onExpired = { [weak self] in
@@ -33,7 +36,7 @@ final class AppModel {
             // Signed in before a permission was added (2026-10-02: playlist
             // editing). Spotify only grants new scopes at sign-in.
             auth.signOut()
-            signInError = "Sign in again so Focused can add songs to your playlists."
+            signInError = "Sign in again so Focused can edit your playlists and library."
         }
         if auth.isSignedIn { startSpotify() }
     }
@@ -66,6 +69,7 @@ final class AppModel {
     private func start(_ music: any MusicService, mode: Mode, scope: String) {
         music.onNotice = { [weak self] in self?.show($0) }
         self.music = music
+        deletedIDs = []
         home = HomeSelection(scope: scope)
         self.mode = mode
         playlists = []
@@ -103,6 +107,34 @@ final class AppModel {
     }
 
     // MARK: Library
+
+    /// Removes it from the library and Home right away; puts both back if
+    /// Spotify refuses.
+    /// Undoing a failure puts back only this playlist, and only in the same
+    /// session, so other Home changes made meanwhile survive.
+    func delete(_ playlist: Playlist) async {
+        guard let music, let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        let homeIndex = home.ids.firstIndex(of: playlist.id)
+        playlists.remove(at: index)
+        home.remove(playlist)
+        do {
+            try await music.deletePlaylist(playlist)
+            guard self.music === music else { return }
+            // A refresh that finished meanwhile (or finishes later) may
+            // bring it back.
+            deletedIDs.insert(playlist.id)
+            playlists.removeAll { $0.id == playlist.id }
+            home.remove(playlist)
+            show(playlist.isOwned ? "Deleted \(playlist.name)" : "Removed \(playlist.name) from your library")
+        } catch {
+            guard self.music === music else { return }
+            if !playlists.contains(where: { $0.id == playlist.id }) {
+                playlists.insert(playlist, at: min(index, playlists.count))
+            }
+            if let homeIndex { home.insert(playlist, at: homeIndex) }
+            show(error.localizedDescription)
+        }
+    }
 
     /// False if Spotify refused, so the caller can put the song back.
     func remove(_ track: Track, from playlist: Playlist, copies: Int) async -> Bool {
@@ -145,7 +177,7 @@ final class AppModel {
         do {
             let loaded = try await music.loadPlaylists()
             guard isCurrent() else { return }
-            playlists = loaded
+            playlists = loaded.filter { !deletedIDs.contains($0.id) }
             home.seedIfNeeded(from: playlists, preview: mode == .preview)
             libraryState = .loaded
         } catch SpotifyAuth.AuthError.signedOut {
@@ -181,6 +213,12 @@ final class HomeSelection {
 
     func remove(_ playlist: Playlist) {
         ids.removeAll { $0 == playlist.id }
+        save()
+    }
+
+    func insert(_ playlist: Playlist, at index: Int) {
+        guard !ids.contains(playlist.id) else { return }
+        ids.insert(playlist.id, at: min(index, ids.count))
         save()
     }
 

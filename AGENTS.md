@@ -28,7 +28,7 @@ Files that should exist only in Debug builds start with `Debug`; Release exclude
 xcodebuild -project Focused.xcodeproj -scheme Focused -destination 'generic/platform=iOS Simulator' build
 ```
 
-After a user-testable change, run `scripts/run-on-iphone.sh`. It builds, installs and launches on Noah's iPhone. If the phone is unavailable or locked, say so and tell Noah to run from Xcode. Screen flags open the app on the surface under test: `--preview`, `--search`, `--library`, `--playlist`, `--play`, `--now-playing`, `--artist`, `--album`. Add a flag (backed by a Debug launch argument in `MainView.openDebugScreen`) for each new surface Noah tests.
+After a user-testable change, run `scripts/run-on-iphone.sh`. It builds, installs and launches on Noah's iPhone. If the phone is unavailable or locked, say so and tell Noah to run from Xcode. Screen flags open the app on the surface under test: `--preview`, `--search`, `--library`, `--playlist`, `--play`, `--now-playing`, `--artist`, `--album`, `--loader`. Add a flag (backed by a Debug launch argument in `MainView.openDebugScreen`) for each new surface Noah tests.
 
 Signing: Harmony Mental Health, LLC team (`4X89BKDS2G`, the paid account), bundle ID `com.harmonyappai.FocusedSpotify`. Development installs last about a year; re-run the script to renew.
 

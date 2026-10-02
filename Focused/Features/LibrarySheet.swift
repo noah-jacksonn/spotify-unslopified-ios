@@ -8,6 +8,7 @@ struct LibrarySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var filter: Filter = .mine
     @State private var query = ""
+    @State private var deleting: Playlist?
 
     enum Filter: String, CaseIterable { case mine = "By you", all = "All", others = "By others" }
 
@@ -40,6 +41,8 @@ struct LibrarySheet: View {
             .pageBackground()
             .appDestinations()
         }
+        .playerBar()
+        .deletePlaylistConfirmation($deleting)
         .presentationBackground(look.palette.background)
     }
 
@@ -92,6 +95,11 @@ struct LibrarySheet: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
+                    deleting = playlist
+                }
+            }
 
             Button {
                 withAnimation(look.animation) { model.home.toggle(playlist) }
@@ -109,6 +117,37 @@ struct LibrarySheet: View {
             .buttonStyle(PressScale())
             .sensoryFeedback(.selection, trigger: chosen)
             .accessibilityLabel(chosen ? "Remove \(playlist.name) from Home" : "Show \(playlist.name) on Home")
+        }
+    }
+}
+
+extension View {
+    /// Asks before deleting `playlist` (set it to show the dialog). Says
+    /// "Delete" for your own playlists and "Remove" for others', since
+    /// Spotify only removes those from your library.
+    func deletePlaylistConfirmation(_ playlist: Binding<Playlist?>) -> some View {
+        modifier(DeletePlaylistConfirmation(playlist: playlist))
+    }
+}
+
+private struct DeletePlaylistConfirmation: ViewModifier {
+    @Binding var playlist: Playlist?
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            playlist.map { $0.isOwned ? "Delete “\($0.name)”?" : "Remove “\($0.name)” from your library?" } ?? "",
+            isPresented: Binding(get: { playlist != nil }, set: { if !$0 { playlist = nil } }),
+            titleVisibility: .visible,
+            presenting: playlist
+        ) { target in
+            Button(target.isOwned ? "Delete playlist" : "Remove from library", role: .destructive) {
+                Task { await model.delete(target) }
+            }
+        } message: { target in
+            Text(target.isOwned
+                 ? "It's deleted from your Spotify library. Spotify can restore it from your account page for 90 days."
+                 : "It stays on Spotify; it just leaves your library.")
         }
     }
 }

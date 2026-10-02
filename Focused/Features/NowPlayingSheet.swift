@@ -6,18 +6,24 @@ struct NowPlayingSheet: View {
     var music: any MusicService
     @Environment(\.look) private var look
 
+    /// A navigation stack of its own, so the artist name can open the
+    /// artist page inside the player, with Back returning to the song.
     var body: some View {
-        ZStack {
-            AmbientBackground()
-            if let state = music.nowPlaying {
-                poster(state)
-                    .animation(look.animation, value: state.trackURI)
-            } else {
-                Text("Nothing playing").font(look.font(17)).foregroundStyle(look.palette.muted)
+        NavigationStack {
+            ZStack {
+                AmbientBackground()
+                if let state = music.nowPlaying {
+                    poster(state)
+                        .animation(look.animation, value: state.trackURI)
+                } else {
+                    Text("Nothing playing").font(look.font(17)).foregroundStyle(look.palette.muted)
+                }
             }
-        }
-        .overlay(alignment: .top) {
-            Capsule().fill(look.palette.text.opacity(0.25)).frame(width: 38, height: 5).padding(.top, 8)
+            .overlay(alignment: .top) {
+                Capsule().fill(look.palette.text.opacity(0.25)).frame(width: 38, height: 5).padding(.top, 8)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .appDestinations()
         }
         .presentationDragIndicator(.hidden)
         .presentationBackground(look.palette.background)
@@ -51,13 +57,27 @@ struct NowPlayingSheet: View {
                         .foregroundStyle(look.palette.text)
                         .lineLimit(3)
                         .minimumScaleFactor(0.6)
-                    Text(state.artist)
+                    let artistName = Text(state.artist)
                         .font(look.font(20, .medium))
                         .foregroundStyle(look.palette.accent)
+                    if let artist = state.artistItem {
+                        NavigationLink(value: artist) { artistName.multilineTextAlignment(.leading) }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens the artist")
+                    } else {
+                        artistName
+                    }
                 }
                 Spacer(minLength: 0)
-                AddToPlaylistMenu(track: state.asTrack, style: .quiet)
-                    .padding(.top, 6)
+                HStack(spacing: 2) {
+                    // Podcasts only: on 2026-10-03 the phone showed Spotify
+                    // accepts a speed for songs but keeps playing at 1×.
+                    if state.isEpisode, !music.podcastSpeeds.isEmpty {
+                        SpeedMenu(speeds: music.podcastSpeeds, current: state.speed, choose: music.setPodcastSpeed)
+                    }
+                    AddToPlaylistMenu(track: state.asTrack, style: .quiet)
+                }
+                .padding(.top, 6)
             }
             .id(state.trackURI)
             .transition(.opacity)
@@ -76,5 +96,39 @@ private extension NowPlaying {
     var asTrack: Track {
         Track(id: trackURI, name: title, artists: artist, album: album, imageURL: nil,
               durationMs: durationMs, uri: trackURI)
+    }
+}
+
+/// The podcast speed as quiet text ("1×") beside the add button; tapping
+/// lists the speeds (Noah, 2026-10-03: a row of chips was too noisy).
+private struct SpeedMenu: View {
+    var speeds: [Double]
+    var current: Double
+    var choose: (Double) -> Void
+    @Environment(\.look) private var look
+
+    var body: some View {
+        Menu {
+            Picker("Speed", selection: Binding(get: { closest }, set: choose)) {
+                ForEach(speeds, id: \.self) { Text(label($0)).tag($0) }
+            }
+        } label: {
+            Text(label(current))
+                .font(look.font(16, .medium).monospacedDigit())
+                .foregroundStyle(look.palette.muted)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .sensoryFeedback(.selection, trigger: current)
+        .accessibilityLabel("Playback speed \(label(current))")
+    }
+
+    /// The listed speed nearest the reported one, so the menu marks it.
+    private var closest: Double {
+        speeds.min { abs($0 - current) < abs($1 - current) } ?? current
+    }
+
+    private func label(_ speed: Double) -> String {
+        speed.formatted(.number.precision(.fractionLength(0...2))) + "×"
     }
 }
