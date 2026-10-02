@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Spotify sends the user back here after sign-in and after the
+	     Spotify app is woken to start playback. Must match the redirect URI
+	     registered on the Spotify developer dashboard (Config.redirectURI). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.harmonyappai.FocusedSpotify.spotify</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>focusedspotify</string>
+			</array>
+		</dict>
+	</array>
+	<!-- The Spotify iOS SDK checks whether the Spotify app is installed
+	     before handing playback to it. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+	</array>
+</dict>
+</plist>
