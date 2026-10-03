@@ -11,7 +11,7 @@ Focused is a native SwiftUI remote for Spotify: a quiet Home of playlists Noah p
 
 ## Design system
 
-- The look is locked in from Noah's on-phone segtest (2026-10-02): Ink palette, SF Rounded, a soft accent glow behind pages, calm 0.35 s easing, a List Home with 88 pt round-cornered art, the wordmark header, airy spacing, a full-width Bar mini player and the Poster full player. It lives in `Focused/Design/Look.swift` and is read from `@Environment(\.look)`. Screens use `look.palette`, `look.font`/`look.display`, `look.artRadius`, `.surface(look, in:)`, `look.animation`; never hard-code colors or fonts.
+- The look is locked in from Noah's on-phone segtest (2026-10-02): Ink palette, SF Rounded, a soft glow behind pages (colored from the current song's art since 2026-10-03, the accent when nothing plays; `look.glow`), calm 0.35 s easing, a List Home with 88 pt round-cornered art, the wordmark header, airy spacing, a full-width Bar mini player and the Poster full player. It lives in `Focused/Design/Look.swift` and is read from `@Environment(\.look)`. Screens use `look.palette`, `look.font`/`look.display`, `look.artRadius`, `.surface(look, in:)`, `look.animation`; never hard-code colors or fonts.
 - Deployment target is iOS 26 (Noah's phone), so iOS 26 APIs (Liquid Glass, MeshGradient) are available without availability checks.
 
 ## Segtest

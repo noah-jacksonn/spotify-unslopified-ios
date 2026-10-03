@@ -8,9 +8,11 @@ struct RootView: View {
     /// "system", "light" or "dark". A segtest panel's footer toggles it;
     /// it was left at dark when the look was locked in.
     @AppStorage("appearanceOverride") private var appearanceOverride = "system"
+    /// The current song's art color, for the page glow.
+    @State private var artTint: UIColor?
 
     var body: some View {
-        let look = Look(isDark: colorScheme == .dark)
+        let look = Look(isDark: colorScheme == .dark, artTint: artTint)
         Group {
             switch model.mode {
             case .signedOut:
@@ -22,6 +24,7 @@ struct RootView: View {
         .environment(\.look, look)
         .tint(look.palette.accent)
         .animation(look.animation, value: model.mode)
+        .background { ArtTintWatcher(tint: $artTint) }
         .onAppear { applyAppearance() }
         .onChange(of: appearanceOverride) { applyAppearance() }
         .onChange(of: scenePhase) { _, phase in
@@ -49,6 +52,30 @@ struct RootView: View {
                 window.overrideUserInterfaceStyle = style
             }
         }
+    }
+}
+
+/// Keeps `tint` on the current song's art color. Its own view, so playback
+/// updates re-render only this and not the whole app.
+private struct ArtTintWatcher: View {
+    @Binding var tint: UIColor?
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Color.clear.task(id: model.music?.nowPlaying?.artwork) { await update() }
+    }
+
+    /// Back to the accent when nothing is playing. A song whose art hasn't
+    /// arrived yet keeps the previous color, so the glow doesn't flash
+    /// between songs.
+    private func update() async {
+        guard let artwork = model.music?.nowPlaying?.artwork else {
+            tint = nil
+            return
+        }
+        guard artwork != .none else { return }
+        let found = await ArtGlow.tint(for: artwork)
+        if !Task.isCancelled { tint = found }
     }
 }
 

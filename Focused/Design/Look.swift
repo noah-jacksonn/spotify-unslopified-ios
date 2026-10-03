@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct Palette {
     var background: Color
@@ -20,10 +21,26 @@ struct Palette {
 struct Look {
     var isDark: Bool
     var palette: Palette
+    /// The color of the glow behind the page: the current song's art
+    /// (`ArtGlow`), else the accent.
+    var glow: Color
 
-    init(isDark: Bool) {
+    init(isDark: Bool, artTint: UIColor? = nil) {
+        let palette = isDark ? Self.inkDark : Self.inkLight
         self.isDark = isDark
-        palette = isDark ? Self.inkDark : Self.inkLight
+        self.palette = palette
+        glow = artTint.map { Self.glowColor(from: $0, isDark: isDark) } ?? palette.accent
+    }
+
+    /// Keeps the art's hue but evens out saturation and brightness, so a
+    /// dull or neon cover still makes a soft glow: light and pale on Ink
+    /// dark, deeper on light (matching how each accent sits).
+    private static func glowColor(from tint: UIColor, isDark: Bool) -> Color {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0
+        tint.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: nil)
+        return isDark
+            ? Color(hue: hue, saturation: min(max(saturation, 0.35), 0.55), brightness: 0.95)
+            : Color(hue: hue, saturation: min(max(saturation, 0.45), 0.8), brightness: 0.78)
     }
 
     // MARK: Type
