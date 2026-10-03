@@ -205,7 +205,8 @@ struct HomeView: View {
 }
 
 /// Home's playlists: 88 pt round-cornered art beside the name, like the
-/// extension's Home. Long-press for Play, Move to top, Remove from Home.
+/// extension's Home. Swipe right to play, left to shuffle; long-press for
+/// Play, Move to top, Remove from Home.
 private struct PlaylistList: View {
     var playlists: [Playlist]
     @Environment(AppModel.self) private var model
@@ -227,10 +228,23 @@ private struct PlaylistList: View {
                         deleting = playlist
                     }
                 }
+                .rowSwipes(
+                    leading: RowSwipe(systemName: "play.fill", label: "Play") {
+                        model.music?.play(.context(uri: playlist.uri))
+                    },
+                    trailing: RowSwipe(systemName: "shuffle", label: "Shuffle") { shuffle(playlist) }
+                )
             }
         }
         .deletePlaylistConfirmation($deleting)
         .padding(.horizontal, look.margin)
+    }
+
+    /// Starts at a random song, as the playlist page's Shuffle does. Home
+    /// doesn't load the songs, so it picks a position from the count.
+    private func shuffle(_ playlist: Playlist) {
+        let position = playlist.trackCount.flatMap { $0 > 0 ? Int.random(in: 0..<$0) : nil }
+        model.music?.shuffle(.context(uri: playlist.uri, position: position))
     }
 
     private func row(_ playlist: Playlist) -> some View {

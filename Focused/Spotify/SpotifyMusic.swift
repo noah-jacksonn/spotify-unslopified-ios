@@ -213,8 +213,11 @@ final class SpotifyMusic: MusicService {
     }
 
     /// How far into the chosen song playback is: App Remote's position when
-    /// it reports that song, else the time since it was started.
+    /// it reports that song, else the time since it was started. A request
+    /// that names only a position (Home's swipe to shuffle) started the
+    /// context's first song instead, so the chosen one starts from the top.
     private func heardSoFar(of request: PlayRequest, since startedAt: Date) -> Int {
+        if case .context(_, nil, _) = request { return 0 }
         if let state = nowPlaying, state.trackURI == request.startURI { return state.position(at: Date()) }
         return max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
     }
