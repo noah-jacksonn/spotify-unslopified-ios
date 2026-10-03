@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var isSearching = false
     @State private var query = ""
     @State private var isLoadingResults = false
+    @State private var barsTaps = 0
     @FocusState private var searchFocused: Bool
     @Namespace private var morph
 
@@ -75,7 +76,7 @@ struct HomeView: View {
             .frame(height: 44)
             if !isSearching {
                 HStack(alignment: .center, spacing: 12) {
-                    BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
+                    barsButton
                     Text("Focused")
                         .font(look.display(38))
                         .tracking(look.titleTracking)
@@ -105,6 +106,24 @@ struct HomeView: View {
         }
         .buttonStyle(PressScale())
         .accessibilityLabel("Search")
+    }
+
+    /// The wordmark's moving bars double as play/pause (Noah, 2026-10-03).
+    /// Inert when nothing is loaded, so a stray tap never starts music.
+    private var barsButton: some View {
+        Button {
+            model.music?.togglePause()
+            barsTaps += 1
+        } label: {
+            BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .disabled(model.music?.nowPlaying == nil)
+        .sensoryFeedback(.impact(weight: .light), trigger: barsTaps)
+        .padding(-7)
+        .accessibilityLabel(isPlaying ? "Pause" : "Play")
     }
 
     private var isPlaying: Bool { model.music?.nowPlaying.map { !$0.isPaused } ?? false }
