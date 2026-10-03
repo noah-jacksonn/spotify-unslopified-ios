@@ -14,6 +14,7 @@
 #   scripts/run-on-iphone.sh --album         open that artist's first album
 #   scripts/run-on-iphone.sh --loader        preview mode, holding Home's loader for 6 s
 #   scripts/run-on-iphone.sh --now-playing   open the full player (starts music)
+#   scripts/run-on-iphone.sh --sleep         open the sleep timer
 #   scripts/run-on-iphone.sh --console       stream stdout/stderr (combinable)
 #
 # Screen flags open the app directly on the surface under test, backed by
@@ -34,6 +35,7 @@ while [ $# -gt 0 ]; do
     --album) APP_ARGS+=(-openAlbum) ;;
     --loader) APP_ARGS+=(-preview -slowLoad) ;;
     --now-playing) APP_ARGS+=(-openNowPlaying) ;;
+    --sleep) APP_ARGS+=(-openSleepTimer) ;;
     *) echo "✗ Unknown option: $1" >&2; exit 1 ;;
   esac
   shift

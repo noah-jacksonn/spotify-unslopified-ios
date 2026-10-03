@@ -38,6 +38,16 @@ struct RootView: View {
             @unknown default: break
             }
         }
+        // Initially too, so a timer from before a relaunch resumes. Not an
+        // initial .background: that's iOS relaunching the app for the
+        // timer's own session events, which schedule the next step.
+        .onChange(of: scenePhase, initial: true) { old, phase in
+            if phase == .active {
+                model.sleepTimer.appBecameActive()
+            } else if phase == .background, old != phase {
+                model.sleepTimer.appEnteredBackground()
+            }
+        }
     }
 
     /// Applied to every window, a segtest panel's included.
