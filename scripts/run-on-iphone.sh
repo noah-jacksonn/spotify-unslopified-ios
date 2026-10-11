@@ -7,12 +7,20 @@
 #   scripts/run-on-iphone.sh                 build, install, launch
 #   scripts/run-on-iphone.sh --preview       launch into the sample-music preview
 #   scripts/run-on-iphone.sh --search        open Search
+#   scripts/run-on-iphone.sh --discover      open Discover
+#   scripts/run-on-iphone.sh --discover-home open Home with its Discover entry
+#   scripts/run-on-iphone.sh --queue         open the queue
 #   scripts/run-on-iphone.sh --library       open All playlists
 #   scripts/run-on-iphone.sh --playlist      open the first Home playlist
 #   scripts/run-on-iphone.sh --play          start the first Home playlist (mini player)
 #   scripts/run-on-iphone.sh --artist        open the first artist a search finds
+#   scripts/run-on-iphone.sh --player-artist open the current artist inside the player
+#   scripts/run-on-iphone.sh --player-album  open the current album inside the player
 #   scripts/run-on-iphone.sh --album         open that artist's first album
 #   scripts/run-on-iphone.sh --loader        preview mode, holding Home's loader for 6 s
+#   scripts/run-on-iphone.sh --cover         open the first Home playlist's cover full screen
+#   scripts/run-on-iphone.sh --lyrics        open full lyrics for the current song
+#   scripts/run-on-iphone.sh --live-lyrics   show the current line in the player
 #   scripts/run-on-iphone.sh --now-playing   open the full player (starts music)
 #   scripts/run-on-iphone.sh --console       stream stdout/stderr (combinable)
 #
@@ -27,13 +35,21 @@ while [ $# -gt 0 ]; do
     --console) CONSOLE=1 ;;
     --preview) APP_ARGS+=(-preview) ;;
     --search) APP_ARGS+=(-openSearch) ;;
+    --queue) APP_ARGS+=(-openQueue) ;;
+    --daily-five|--discover) APP_ARGS+=(-openDailyFive) ;;
+    --discover-home) ;; # Home is the default; keep its normal top alignment.
     --library) APP_ARGS+=(-openLibrary) ;;
     --playlist) APP_ARGS+=(-openPlaylist) ;;
     --play) APP_ARGS+=(-autoplay) ;;
     --artist) APP_ARGS+=(-openArtist) ;;
+    --player-artist) APP_ARGS+=(-openPlayerArtist) ;;
+    --player-album) APP_ARGS+=(-openPlayerAlbum) ;;
     --album) APP_ARGS+=(-openAlbum) ;;
     --loader) APP_ARGS+=(-preview -slowLoad) ;;
+    --cover) APP_ARGS+=(-openPlaylist -openCover) ;;
     --now-playing) APP_ARGS+=(-openNowPlaying) ;;
+    --lyrics) APP_ARGS+=(-openLyrics) ;;
+    --live-lyrics) APP_ARGS+=(-liveLyrics) ;;
     *) echo "✗ Unknown option: $1" >&2; exit 1 ;;
   esac
   shift

@@ -6,6 +6,7 @@ import Foundation
 /// owns or collaborates on; search returns at most 10 per type.
 struct SpotifyAPI {
     let auth: SpotifyAuth
+    var session: URLSession = .shared
 
     enum APIError: LocalizedError {
         case http(status: Int, reason: String?, message: String?)
@@ -30,6 +31,11 @@ struct SpotifyAPI {
                 return message ?? "Spotify returned an error (\(status))."
             }
         }
+    }
+
+    func accountID() async throws -> String {
+        let me: MeDTO = try await get("me")
+        return me.id
     }
 
     // MARK: Library
@@ -97,11 +103,12 @@ struct SpotifyAPI {
 
     /// Up to 10 of the artist's songs, most popular first: a track search
     /// filtered to songs actually credited to this artist.
-    func popularTracks(for artist: CatalogItem) async throws -> [Track] {
+    func popularTracks(for artist: CatalogItem, offset: Int = 0) async throws -> [Track] {
         let response: SearchDTO = try await get("search", [
             // Quotes would end the phrase early, so they're dropped.
             .init(name: "q", value: "artist:\"\(artist.name.replacingOccurrences(of: "\"", with: ""))\""),
             .init(name: "type", value: "track"),
+            .init(name: "offset", value: String(offset)),
             .init(name: "limit", value: "10"),
         ])
         let tracks = response.tracks?.items.compactMap { $0?.model } ?? []
@@ -136,11 +143,18 @@ struct SpotifyAPI {
         }
         // Album tracks come without album info; fill it from the album.
         let image = album.images?.bestURL
-        tracks = tracks.map { var track = $0; track.imageURL = image; track.album = album.name; return track }
         let artists = (album.artists ?? []).compactMap { artist in artist.id.map { CatalogItem.spotifyArtist(id: $0, name: artist.name) } }
+        let albumItem = CatalogItem(id: album.id, kind: .album, name: album.name,
+                                    subtitle: artists.map(\.name).joined(separator: ", "), imageURL: image, uri: album.uri)
+        tracks = tracks.map {
+            var track = $0
+            track.imageURL = image
+            track.album = album.name
+            track.albumItem = albumItem
+            return track
+        }
         return AlbumPage(
-            album: CatalogItem(id: album.id, kind: .album, name: album.name,
-                               subtitle: artists.map(\.name).joined(separator: ", "), imageURL: image, uri: album.uri),
+            album: albumItem,
             artists: artists,
             year: album.release_date.map { String($0.prefix(4)) },
             tracks: tracks
@@ -179,6 +193,20 @@ struct SpotifyAPI {
         try await send("PUT", "me/player/play", query, json: body)
     }
 
+    func playbackQueue() async throws -> PlaybackQueue {
+        struct Response: Decodable {
+            var currently_playing: TrackDTO?
+            var queue: [TrackDTO?]
+        }
+        let response: Response = try await get("me/player/queue")
+        return PlaybackQueue(current: response.currently_playing?.model,
+                             upcoming: response.queue.compactMap { $0?.model })
+    }
+
+    func enqueue(_ uri: String) async throws {
+        try await send("POST", "me/player/queue", [.init(name: "uri", value: uri)])
+    }
+
     func resume() async throws { try await send("PUT", "me/player/play") }
     func pause() async throws { try await send("PUT", "me/player/pause") }
     func setShuffle(_ on: Bool) async throws {
@@ -207,7 +235,8 @@ struct SpotifyAPI {
             positionMs: state.progress_ms ?? 0,
             durationMs: item.duration_ms ?? 0,
             updatedAt: Date(),
-            artistItem: item.artists?.first.flatMap { artist in artist.id.map { .spotifyArtist(id: $0, name: artist.name) } }
+            artistItem: item.artists?.first.flatMap { artist in artist.id.map { .spotifyArtist(id: $0, name: artist.name) } },
+            albumItem: item.albumItem
         )
     }
 
@@ -258,7 +287,7 @@ struct SpotifyAPI {
         } else if method != "GET" {
             request.httpBody = Data()
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let http = response as! HTTPURLResponse
         if (200..<300).contains(http.statusCode) { return (data, http) }
 
@@ -349,7 +378,7 @@ private struct PlaylistItemDTO: Decodable {
 
 /// Tracks and podcast episodes share this shape loosely.
 private struct TrackDTO: Decodable {
-    struct Album: Decodable { var name: String; var images: [ImageDTO]? }
+    struct Album: Decodable { var id: String?; var uri: String?; var name: String; var images: [ImageDTO]? }
     var id: String?
     var name: String
     var uri: String
@@ -360,9 +389,19 @@ private struct TrackDTO: Decodable {
     var images: [ImageDTO]?
     var is_local: Bool?
     var track_number: Int?
+    var is_playable: Bool?
+    struct Restrictions: Decodable { var reason: String? }
+    var restrictions: Restrictions?
+    struct ExternalIDs: Decodable { var isrc: String? }
+    var external_ids: ExternalIDs?
 
     var artistLine: String { artists?.map(\.name).joined(separator: ", ") ?? show?.name ?? "" }
     var imageURL: URL? { album?.images?.bestURL ?? images?.bestURL }
+    var albumItem: CatalogItem? {
+        guard !NowPlaying.isSpoken(uri: uri), let album,
+              let albumURI = album.uri ?? album.id.map({ "spotify:album:\($0)" }) else { return nil }
+        return .spotifyAlbum(uri: albumURI, name: album.name, artist: artistLine, imageURL: album.images?.bestURL)
+    }
 
     var model: Track? {
         guard is_local != true else { return nil }
@@ -375,7 +414,11 @@ private struct TrackDTO: Decodable {
             durationMs: duration_ms ?? 0,
             uri: uri,
             artistIDs: artists?.compactMap(\.id) ?? [],
-            number: track_number
+            artistNames: artists?.filter { $0.id != nil }.map(\.name) ?? [],
+            recordingID: external_ids?.isrc,
+            number: track_number,
+            albumItem: albumItem,
+            isPlayable: restrictions == nil ? is_playable : false
         )
     }
 }

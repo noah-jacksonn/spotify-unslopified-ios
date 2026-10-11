@@ -20,42 +20,53 @@ struct PlaylistView: View {
     /// A plain List (styled like the rest of the app) rather than a
     /// ScrollView, because swipe actions only exist on List rows.
     var body: some View {
-        List {
-            Group {
-                header.padding(.bottom, look.gap * 0.6)
-                switch state {
-                case .loading:
-                    ProgressView().tint(look.palette.muted).frame(maxWidth: .infinity, minHeight: 120)
-                case .unavailable:
-                    note("Spotify only shares the song list for playlists you own. Play works as usual.")
-                case .failed(let message):
-                    note(message)
-                case .loaded:
-                    ForEach(entries) { entry in row(entry.track) }
+        ScrollViewReader { proxy in
+            List {
+                Group {
+                    header.padding(.bottom, look.gap * 0.6)
+                    switch state {
+                    case .loading:
+                        BarsLoader().frame(maxWidth: .infinity, minHeight: 120)
+                    case .unavailable:
+                        note("Spotify only shares the song list for playlists you own. Play works as usual.")
+                    case .failed(let message):
+                        note(message)
+                    case .loaded:
+                        ForEach(entries) { entry in row(entry.track) }
+                    }
                 }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: look.margin, bottom: 0, trailing: look.margin))
             }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 0, leading: look.margin, bottom: 0, trailing: look.margin))
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.bottom, 24, for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .pageBackground()
+            .task {
+                await load()
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-playlistBottom"), let last = entries.last {
+                    // Reproduce the last-row/mini-player layout without changing
+                    // saved preferences or requiring manual scrolling.
+                    await Task.yield()
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                    try? await Task.sleep(for: .milliseconds(500))
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+                #endif
+            }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.bottom, 40, for: .scrollContent)
-        .scrollIndicators(.hidden)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .navigationBarTitleDisplayMode(.inline)
-        .pageBackground()
-        .task { await load() }
     }
 
     private var isOnHome: Bool { model.home.contains(playlist) }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ArtworkView(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
-                .frame(width: 220, height: 220)
-                .artClip(look, size: 220)
-                .shadow(color: .black.opacity(look.isDark ? 0.45 : 0.18), radius: 26, y: 14)
+            HeaderCover(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
                 .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center, spacing: 10) {
@@ -98,25 +109,23 @@ struct PlaylistView: View {
     }
 
 
-    /// Tap plays from this song. Swipe left, or long-press, to remove it
-    /// from the playlist (only your own playlists list their songs).
+    /// Swipe right queues; removal stays on the opposite edge and in the menu.
     private func row(_ track: Track) -> some View {
-        TrackRow(track: track) {
+        TrackRow(track: track, swipeToQueue: false, onRemove: { remove(track) }) {
             model.music?.play(.context(uri: playlist.uri, startAt: track.uri, position: track.position))
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button("Queue", systemImage: "text.badge.plus") { model.enqueue([track]) }
+                .tint(look.palette.accent)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { remove(track) } label: {
                 Label("Remove", systemImage: "trash")
             }
             // The app-wide accent tint would otherwise paint it blue.
             .tint(.red)
         }
-        .contextMenu {
-            Button("Play", systemImage: "play.fill") {
-                model.music?.play(.context(uri: playlist.uri, startAt: track.uri, position: track.position))
-            }
-            Button("Remove from playlist", systemImage: "trash", role: .destructive) { remove(track) }
-        }
+        .accessibilityHint("Swipe right to queue")
     }
 
     /// Removes right away and puts the song back if Spotify refuses.

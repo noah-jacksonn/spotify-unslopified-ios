@@ -62,6 +62,11 @@ struct SearchResultsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    if let playlist = model.playlists.first(where: { $0.uri == item.uri && $0.isMine }) {
+                        Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
+                    }
+                }
             }
         }
         .padding(.horizontal, look.margin)
@@ -117,7 +122,7 @@ struct SearchField: View {
                 .submitLabel(.search)
                 .autocorrectionDisabled()
             if isLoading {
-                ProgressView().controlSize(.small)
+                BarsLoader(size: 14, delay: .zero)
             } else if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(look.palette.muted)
@@ -136,9 +141,8 @@ struct SearchField: View {
     }
 }
 
-/// A + beside a song: lists the playlists you can edit (yours and
-/// collaborative ones) and adds the song to the one you pick. Turns into a
-/// ✓ for a moment once added, so the confirmation sits where the tap was.
+/// Song options: queue it or add it to an editable playlist. Playlist adds
+/// briefly show a checkmark; queue confirmations come from AppModel.
 struct AddToPlaylistMenu: View {
     enum Style { case compact, quiet }
 
@@ -150,7 +154,9 @@ struct AddToPlaylistMenu: View {
 
     var body: some View {
         Menu {
-            Section("Add to playlist") {
+            Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue([track]) }
+            SeeAlbumButton(track: track)
+            Menu("Add to playlist", systemImage: "plus") {
                 ForEach(model.playlists.filter(\.isMine)) { playlist in
                     Button(playlist.name) {
                         Task { await add(to: playlist) }
@@ -160,7 +166,7 @@ struct AddToPlaylistMenu: View {
         } label: {
             switch style {
             case .compact:
-                Image(systemName: justAdded ? "checkmark" : "plus")
+                Image(systemName: justAdded ? "checkmark" : "ellipsis")
                     .font(.system(size: 11, weight: .bold))
                     .contentTransition(.symbolEffect(.replace))
                     .foregroundStyle(look.palette.text)
@@ -170,7 +176,7 @@ struct AddToPlaylistMenu: View {
                     .contentShape(Rectangle())
             case .quiet:
                 // Matches the playlist page's Home toggle beside its title.
-                Image(systemName: justAdded ? "checkmark.circle.fill" : "plus.circle")
+                Image(systemName: justAdded ? "checkmark.circle.fill" : "ellipsis.circle")
                     .font(.system(size: 26, weight: .regular))
                     .contentTransition(.symbolEffect(.replace))
                     .foregroundStyle(look.palette.muted)
@@ -179,7 +185,7 @@ struct AddToPlaylistMenu: View {
             }
         }
         .sensoryFeedback(.success, trigger: justAdded) { _, new in new }
-        .accessibilityLabel(justAdded ? "Added" : "Add \(track.name) to a playlist")
+        .accessibilityLabel(justAdded ? "Added" : "Options for \(track.name)")
     }
 
     private func add(to playlist: Playlist) async {
@@ -187,5 +193,53 @@ struct AddToPlaylistMenu: View {
         withAnimation(look.animation) { justAdded = true }
         try? await Task.sleep(for: .seconds(2))
         withAnimation(look.animation) { justAdded = false }
+    }
+}
+
+/// Each stack supplies the album action so song menus push within their
+/// current surface, including sheets, and Back returns to the same place.
+private struct OpenSongAlbumKey: EnvironmentKey {
+    static let defaultValue: ((CatalogItem) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var openSongAlbum: ((CatalogItem) -> Void)? {
+        get { self[OpenSongAlbumKey.self] }
+        set { self[OpenSongAlbumKey.self] = newValue }
+    }
+}
+
+struct SeeAlbumButton: View {
+    var track: Track
+    @Environment(\.openSongAlbum) private var openAlbum
+
+    var body: some View {
+        if let album = track.albumItem, let openAlbum {
+            Button("See Album", systemImage: "square.stack") { openAlbum(album) }
+        }
+    }
+}
+
+private struct SongContextMenu: ViewModifier {
+    var track: Track
+    var play: (() -> Void)?
+    var remove: (() -> Void)?
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue([track]) }
+            if let play { Button("Play", systemImage: "play.fill", action: play) }
+            SeeAlbumButton(track: track)
+            if let remove {
+                Button("Remove from playlist", systemImage: "trash", role: .destructive, action: remove)
+            }
+        }
+    }
+}
+
+extension View {
+    func songContextMenu(_ track: Track, play: (() -> Void)? = nil, remove: (() -> Void)? = nil) -> some View {
+        modifier(SongContextMenu(track: track, play: play, remove: remove))
     }
 }

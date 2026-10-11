@@ -79,6 +79,35 @@ final class SpotifyMusic: MusicService {
 
     // MARK: Library
 
+    func accountID() async throws -> String {
+        if let id = auth.tokens?.accountID { return id }
+        let session = auth.sessionID
+        let id = try await api.accountID()
+        auth.rememberAccountID(id, for: session)
+        return id
+    }
+
+    /// Rotate through catalog search and releases, without restricted
+    /// recommendation, related-artist, or audio-analysis endpoints.
+    func discoveryTracks(for artist: CatalogItem, rotation: Int) async throws -> [Track] {
+        var candidates: [Track] = []
+        do {
+            candidates = try await api.popularTracks(for: artist, offset: (rotation % 4) * 10)
+        } catch let error as SpotifyAPI.APIError where error.status == 403 || error.status == 404 {
+            // An unavailable catalog item must not discard other artists.
+        }
+        do {
+            let releases = try await api.albums(ofArtist: artist.id, group: "album,single", pages: 1)
+            if !releases.isEmpty {
+                let album = releases[rotation % releases.count]
+                candidates += try await api.album(album.id).tracks.filter { $0.artistIDs.contains(artist.id) }
+            }
+        } catch let error as SpotifyAPI.APIError where error.status == 403 || error.status == 404 {
+            // Search can still supply candidates when a release is unavailable.
+        }
+        return candidates
+    }
+
     func loadPlaylists() async throws -> [Playlist] { try await api.myPlaylists() }
     func tracks(in playlist: Playlist) async throws -> [Track] { try await api.tracks(inPlaylist: playlist.id) }
     func search(_ query: String) async throws -> SearchResults { try await api.search(query) }
@@ -102,6 +131,23 @@ final class SpotifyMusic: MusicService {
     }
     func remove(_ trackURIs: [String], from playlist: Playlist) async throws {
         try await api.removeItems(trackURIs, fromPlaylist: playlist.id)
+    }
+
+    func playbackQueue() async throws -> PlaybackQueue { try await api.playbackQueue() }
+
+    func enqueue(_ track: Track) async throws {
+        // Do not wake or start playback when adding. Retrying an ambiguous
+        // failure through another transport could enqueue the song twice.
+        if let player {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                player.enqueueTrackUri(track.uri) { _, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        } else {
+            try await api.enqueue(track.uri)
+        }
     }
 
     // MARK: Playback
@@ -493,7 +539,9 @@ final class SpotifyMusic: MusicService {
             // Spotify accepts a speed for songs but plays them at 1× anyway.
             speed: NowPlaying.isSpoken(uri: track.uri) && state.playbackSpeed > 0 ? Double(state.playbackSpeed) : 1,
             // Episodes report their show here; only artists have a page.
-            artistItem: .spotifyArtist(uri: track.artist.uri, name: track.artist.name)
+            artistItem: .spotifyArtist(uri: track.artist.uri, name: track.artist.name),
+            albumItem: NowPlaying.isSpoken(uri: track.uri) ? nil : .spotifyAlbum(
+                uri: track.album.uri, name: track.album.name, artist: track.artist.name)
         ))
     }
 
@@ -537,6 +585,7 @@ final class SpotifyMusic: MusicService {
         if let old = nowPlaying, let new,
            old.trackURI == new.trackURI, old.isPaused == new.isPaused, old.contextURI == new.contextURI,
            old.durationMs == new.durationMs, old.title == new.title, old.speed == new.speed,
+           old.albumItem == new.albumItem, old.artistItem == new.artistItem,
            new.artwork == .none || old.artwork == new.artwork,
            abs(old.position(at: new.updatedAt) - new.positionMs) < 1500 {
             return

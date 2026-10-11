@@ -14,6 +14,7 @@ final class DemoMusic: MusicService {
     private var albumArtists: [String: String] = [:]
     private var queue: [Track] = []
     private var index = 0
+    private var queuedCount = 0
     private var clock: Task<Void, Never>?
 
     init() {
@@ -38,6 +39,17 @@ final class DemoMusic: MusicService {
         for playlist in playlists {
             tracksByPlaylist[playlist.id] = Self.tracks(for: playlist)
         }
+    }
+
+    func prepareForPlayback(_ tracks: [Track]) { tracksByPlaylist["daily-five"] = tracks }
+
+    func accountID() async throws -> String { "preview" }
+
+    func discoveryTracks(for artist: CatalogItem, rotation: Int) async throws -> [Track] {
+        let album = CatalogItem(id: "discovery-\(artist.id)-\(rotation % 12)", kind: .album,
+                                name: "Side Roads", subtitle: artist.name, uri: "demo:album:discovery-\(artist.id)-\(rotation % 12)", demoSeed: artist.demoSeed ?? Self.artist(named: artist.name).demoSeed)
+        albumArtists[album.id] = artist.name
+        return try await albumPage(album).tracks
     }
 
     func loadPlaylists() async throws -> [Playlist] {
@@ -113,19 +125,36 @@ final class DemoMusic: MusicService {
 
     func albumPage(_ album: CatalogItem) async throws -> AlbumPage {
         try await Task.sleep(for: .milliseconds(200))
+        // Resolve by identity as the real album endpoint does, even when the
+        // navigation item contains only an ID and no artwork or title yet.
+        let album = tracksByPlaylist.values.joined().compactMap(\.albumItem)
+            .first(where: { $0.id == album.id }) ?? album
         let artistName = albumArtists[album.id] ?? (album.subtitle.isEmpty ? "Ostrander" : album.subtitle)
         let tracks = (0..<10).map { i in
             let n = (album.demoSeed ?? 0) * 13 + i * 7
             return Track(id: "\(album.id)-\(i)", name: "\(Self.words[n % Self.words.count]) \(Self.nouns[(n / 3) % Self.nouns.count])",
                          artists: artistName, album: album.name, imageURL: nil, durationMs: 150_000 + (n * 7919) % 120_000,
-                         uri: "demo:track:\(album.id):\(i)", demoSeed: album.demoSeed, number: i + 1)
+                         uri: "demo:track:\(album.id):\(i)", demoSeed: album.demoSeed, artistIDs: [Self.artist(named: artistName).id], artistNames: [artistName], number: i + 1, albumItem: album)
         }
         let artist = Self.artist(named: artistName)
         tracksByPlaylist[album.uri] = tracks
         return AlbumPage(album: album, artists: [artist], year: "2025", tracks: tracks)
     }
 
+    func playbackQueue() async throws -> PlaybackQueue {
+        guard nowPlaying != nil else { return PlaybackQueue(current: nil, upcoming: queue) }
+        return PlaybackQueue(current: queue.indices.contains(index) ? queue[index] : nil,
+                             upcoming: Array(queue.dropFirst(index + 1)))
+    }
+
+    func enqueue(_ track: Track) async throws {
+        let insertion = nowPlaying == nil ? queue.count : min(queue.count, index + 1 + queuedCount)
+        queue.insert(track, at: insertion)
+        queuedCount += 1
+    }
+
     func play(_ request: PlayRequest) {
+        queuedCount = 0
         switch request {
         case let .context(uri, startAt, position):
             let playlist = playlists.first { $0.uri == uri }
@@ -180,6 +209,7 @@ final class DemoMusic: MusicService {
 
     private func step(_ delta: Int) {
         guard !queue.isEmpty else { return }
+        if delta > 0 { queuedCount = max(0, queuedCount - 1) }
         index = (index + delta + queue.count) % queue.count
         start(context: nowPlaying?.contextURI)
     }
@@ -191,7 +221,9 @@ final class DemoMusic: MusicService {
             title: track.name, artist: track.artists, album: track.album,
             artwork: Artwork(url: nil, seed: track.demoSeed), trackURI: track.uri, contextURI: context,
             isPaused: false, positionMs: 0, durationMs: track.durationMs, updatedAt: Date(),
-            artistItem: Self.artist(named: track.artists)
+            artistItem: Self.artist(named: track.artists),
+            albumItem: track.albumItem ?? CatalogItem(id: "album-\(track.artists)-\(track.album)", kind: .album,
+                name: track.album, subtitle: track.artists, uri: "demo:album:\(track.artists):\(track.album)", demoSeed: track.demoSeed)
         )
         clock?.cancel()
         clock = Task { [weak self] in
@@ -225,10 +257,14 @@ final class DemoMusic: MusicService {
             let n = seed * 31 + i * 17
             let name = "\(words[n % words.count]) \(nouns[(n / 3) % nouns.count])"
             let artist = artists[(n / 5) % artists.count]
+            let album = "\(nouns[(n / 7) % nouns.count]) EP"
+            let artworkSeed = (n / 2) % 40
             return Track(
-                id: "\(playlist.id)-\(i)", name: name, artists: artist, album: "\(nouns[(n / 7) % nouns.count]) EP",
+                id: "\(playlist.id)-\(i)", name: name, artists: artist, album: album,
                 imageURL: nil, durationMs: 150_000 + (n * 7919) % 120_000, uri: "demo:track:\(playlist.id):\(i)",
-                demoSeed: (n / 2) % 40
+                demoSeed: artworkSeed, artistIDs: [Self.artist(named: artist).id], artistNames: [artist],
+                albumItem: CatalogItem(id: "album-\(artist)-\(album)", kind: .album, name: album,
+                    subtitle: artist, uri: "demo:album:\(artist):\(album)", demoSeed: artworkSeed)
             )
         }
     }

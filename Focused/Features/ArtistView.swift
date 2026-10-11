@@ -23,12 +23,15 @@ struct ArtistView: View {
                 } else if let error {
                     Text(error).font(look.font(15)).foregroundStyle(look.palette.muted).padding(.horizontal, look.margin)
                 } else {
-                    ProgressView().tint(look.palette.muted).frame(maxWidth: .infinity, minHeight: 160)
+                    BarsLoader().frame(maxWidth: .infinity, minHeight: 160)
                 }
             }
             .padding(.bottom, 40)
         }
         .scrollIndicators(.hidden)
+        // The navigation bar's automatic edge treatment obscures photos
+        // beneath it. The hero supplies its own fade at the bottom instead.
+        .scrollEdgeEffectHidden(true, for: .top)
         .ignoresSafeArea(edges: .top)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -89,6 +92,7 @@ struct ReleaseShelf: View {
     var releases: [CatalogItem]
     var size: CGFloat = 140
     var circle = false
+    @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
 
     var body: some View {
@@ -116,6 +120,11 @@ struct ReleaseShelf: View {
                             .frame(width: size, alignment: circle ? .center : .leading)
                         }
                         .buttonStyle(PressScale())
+                        .contextMenu {
+                            if release.kind == .album {
+                                Button("Add album to queue", systemImage: "text.badge.plus") { model.enqueueAlbum(release) }
+                            }
+                        }
                     }
                 }
             }

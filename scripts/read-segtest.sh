@@ -24,10 +24,11 @@ xcrun devicectl device copy from --device "$COREDEVICE_ID" \
   --source "Library/Preferences/$BUNDLE_ID.plist" \
   --destination "$TMP/prefs.plist" >/dev/null
 
-plutil -convert json -o - "$TMP/prefs.plist" | /usr/bin/python3 -c '
-import json, sys
+/usr/bin/python3 -c '
+import plistlib, sys
 prefix = sys.argv[1]
-prefs = json.load(sys.stdin)
+with open(sys.argv[2], "rb") as source:
+    prefs = plistlib.load(source)
 picks = sorted((k[len("segtest.pick."):], v) for k, v in prefs.items() if k.startswith(prefix))
 if not picks:
     print("No saved segtest picks" + (" for " + prefix[len("segtest.pick."):-1] if prefix != "segtest.pick." else ""))
@@ -35,4 +36,4 @@ for key, value in picks:
     test, _, row = key.partition(".")
     print(f"{test} | {row}: {value}")
 print("appearance: " + str(prefs.get("appearanceOverride", "system")))
-' "$FILTER"
+' "$FILTER" "$TMP/prefs.plist"

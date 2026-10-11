@@ -24,7 +24,10 @@ struct HomeView: View {
                 } else {
                     Group {
                         content
-                        if !model.homePlaylists.isEmpty { allPlaylistsButton }
+                        VStack(spacing: 12) {
+                            if !model.homePlaylists.isEmpty { allPlaylistsButton }
+                            dailyFiveButton
+                        }
                     }
                     .transition(.opacity.combined(with: .offset(y: 24)))
                 }
@@ -65,6 +68,7 @@ struct HomeView: View {
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 } else {
                     Spacer()
+                    QueueButton()
                     searchButton
                     // One way into All playlists: the button under Home's
                     // list (an icon here duplicated it).
@@ -75,9 +79,21 @@ struct HomeView: View {
             .frame(height: 44)
             if !isSearching {
                 HStack(alignment: .center, spacing: 12) {
-                    BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
-                    Text("Focused")
-                        .font(look.display(38))
+                    Button { model.music?.togglePause() } label: {
+                        BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(-7)
+                    .disabled(model.music?.nowPlaying == nil)
+                    .accessibilityLabel(isPlaying ? "Pause" : "Play")
+                    .accessibilityHint("Controls the current song")
+                    .accessibilityIdentifier("home.playbackToggle")
+                    Text("Spotify Unslopified")
+                        .font(look.display(28))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .tracking(look.titleTracking)
                         .foregroundStyle(look.palette.text)
                 }
@@ -150,6 +166,22 @@ struct HomeView: View {
         }
     }
 
+    private var dailyFiveButton: some View {
+        NavigationLink(value: DailyFiveRoute()) {
+            DiscoverEntry(artworks: discoverArtworks)
+        }
+        .buttonStyle(PressScale())
+        .padding(.horizontal, look.margin)
+    }
+
+    private var discoverArtworks: [Artwork] {
+        // Source playlists guide Discover, but their covers aren't its contents.
+        // Empty sleeves stay neutral until a saved or newly loaded edition exists.
+        (model.dailyFive?.edition?.picks ?? []).map {
+            Artwork(url: $0.track.imageURL, seed: $0.track.demoSeed)
+        }
+    }
+
     private var allPlaylistsButton: some View {
         Button { showsLibrary = true } label: {
             HStack(spacing: 10) {
@@ -201,6 +233,9 @@ private struct PlaylistList: View {
                 }
                 .buttonStyle(PressScale())
                 .contextMenu {
+                    if playlist.isMine {
+                        Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
+                    }
                     Button("Play", systemImage: "play.fill") { model.music?.play(.context(uri: playlist.uri)) }
                     Button("Move to top", systemImage: "arrow.up.to.line") { model.home.moveToTop(playlist) }
                     Button("Remove from Home", systemImage: "minus.circle") { model.home.remove(playlist) }
@@ -243,24 +278,11 @@ private struct PlaylistList: View {
     }
 }
 
-/// Home's loader: the app's three bars, small and muted, moving where the
-/// list will appear. Fades in only after a short wait, so a quick load
-/// shows nothing (Noah, 2026-10-03: full-screen placeholder rows were too
-/// much; he wanted something smaller and more subtle).
+/// Home's loader: `BarsLoader` where the list will appear.
 private struct HomeLoadingView: View {
-    @Environment(\.look) private var look
-    @State private var visible = false
-
     var body: some View {
-        BarsMark(color: look.palette.muted.opacity(0.6), size: 22, playing: visible)
+        BarsLoader()
             .frame(maxWidth: .infinity, minHeight: 220)
-            .opacity(visible ? 1 : 0)
-            .animation(look.animation, value: visible)
-            .task {
-                try? await Task.sleep(for: .milliseconds(400))
-                visible = true
-            }
-            .accessibilityElement()
             .accessibilityLabel("Loading your playlists")
     }
 }

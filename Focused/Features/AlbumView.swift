@@ -24,7 +24,7 @@ struct AlbumView: View {
                 } else if let error {
                     Text(error).font(look.font(15)).foregroundStyle(look.palette.muted)
                 } else {
-                    ProgressView().tint(look.palette.muted).frame(maxWidth: .infinity, minHeight: 120)
+                    BarsLoader().frame(maxWidth: .infinity, minHeight: 120)
                 }
             }
             .padding(.horizontal, look.margin)
@@ -39,12 +39,9 @@ struct AlbumView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ArtworkView(artwork: Artwork(url: album.imageURL, seed: album.demoSeed))
-                .frame(width: 220, height: 220)
-                .artClip(look, size: 220)
-                .shadow(color: .black.opacity(look.isDark ? 0.45 : 0.18), radius: 26, y: 14)
+            HeaderCover(artwork: headerArtwork)
             VStack(alignment: .leading, spacing: 6) {
-                Text(album.name)
+                Text((page?.album ?? album).name)
                     .font(look.display(32))
                     .tracking(look.titleTracking)
                     .foregroundStyle(look.palette.text)
@@ -66,6 +63,17 @@ struct AlbumView: View {
             .padding(.top, 4)
         }
         .padding(.top, 8)
+    }
+
+    private var headerArtwork: Artwork {
+        let loaded = page?.album ?? album
+        if let image = loaded.imageURL ?? album.imageURL { return .url(image) }
+        if let seed = loaded.demoSeed ?? album.demoSeed { return .seed(seed) }
+        // App Remote supplies album identity separately from its cached cover.
+        if let playing = model.music?.nowPlaying, playing.albumItem?.uri == album.uri {
+            return playing.artwork
+        }
+        return .none
     }
 
     private var details: String {

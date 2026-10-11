@@ -9,21 +9,26 @@ struct LibrarySheet: View {
     @State private var filter: Filter = .mine
     @State private var query = ""
     @State private var deleting: Playlist?
+    @State private var path = NavigationPath()
 
     enum Filter: String, CaseIterable { case mine = "By you", all = "All", others = "By others" }
 
     var body: some View {
         let visible = visible
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: look.gap * 0.7) {
                     filters
                     ForEach(visible) { playlist in row(playlist) }
                     if visible.isEmpty {
-                        Text(model.libraryState == .loading ? "Loading…" : "No playlists here")
-                            .font(look.font(15))
-                            .foregroundStyle(look.palette.muted)
-                            .padding(.top, 20)
+                        if model.libraryState == .loading {
+                            BarsLoader().frame(maxWidth: .infinity).padding(.top, 40)
+                        } else {
+                            Text("No playlists here")
+                                .font(look.font(15))
+                                .foregroundStyle(look.palette.muted)
+                                .padding(.top, 20)
+                        }
                     }
                 }
                 .padding(.horizontal, look.margin)
@@ -41,6 +46,7 @@ struct LibrarySheet: View {
             .pageBackground()
             .appDestinations()
         }
+        .songAlbumNavigation(path: $path)
         .playerBar()
         .deletePlaylistConfirmation($deleting)
         .presentationBackground(look.palette.background)
@@ -96,6 +102,9 @@ struct LibrarySheet: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
+                    if playlist.isMine {
+                        Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
+                    }
                 Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
                     deleting = playlist
                 }

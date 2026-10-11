@@ -6,16 +6,23 @@ final class AppModel {
     enum LibraryState: Equatable { case idle, loading, loaded, failed(String) }
 
     let auth = SpotifyAuth()
+    /// Outlives player sheets so closing a song doesn't discard its lyrics.
+    let lyrics = LyricsState()
     private(set) var mode: Mode = .signedOut
     private(set) var music: (any MusicService)?
     private(set) var playlists: [Playlist] = []
     private(set) var libraryState: LibraryState = .idle
+    private(set) var dailyFive: DailyFive?
+    private(set) var dailyFiveError: String?
     private(set) var home = HomeSelection(scope: "spotify")
     var signInError: String?
     /// A short message shown over every screen (`noticeOverlay`), then
     /// cleared after a few seconds.
     private(set) var notice: Notice?
     private var noticeTask: Task<Void, Never>?
+    private var enqueueTask: Task<Void, Never>?
+    private(set) var queueRevision = 0
+    private(set) var pendingQueueRequests = 0
     /// Deleted this session; kept out of library loads that started before
     /// Spotify caught up.
     private var deletedIDs: Set<String> = []
@@ -36,7 +43,7 @@ final class AppModel {
             // Signed in before a permission was added (2026-10-02: playlist
             // editing). Spotify only grants new scopes at sign-in.
             auth.signOut()
-            signInError = "Sign in again so Focused can edit your playlists and library."
+            signInError = "Sign in again so Spotify Unslopified can edit your playlists and library."
         }
         if auth.isSignedIn { startSpotify() }
     }
@@ -67,7 +74,14 @@ final class AppModel {
     func startSpotify() { start(SpotifyMusic(auth: auth), mode: .spotify, scope: "spotify") }
 
     private func start(_ music: any MusicService, mode: Mode, scope: String) {
+        lyrics.load(for: nil)
         music.onNotice = { [weak self] in self?.show($0) }
+        enqueueTask?.cancel()
+        enqueueTask = nil
+        pendingQueueRequests = 0
+        dailyFive?.cancel()
+        dailyFive = nil
+        dailyFiveError = nil
         self.music = music
         deletedIDs = []
         home = HomeSelection(scope: scope)
@@ -98,12 +112,101 @@ final class AppModel {
     }
 
     func signOut() {
+        dailyFive?.cancel()
+        dailyFive = nil
+        dailyFiveError = nil
+        enqueueTask?.cancel()
+        enqueueTask = nil
+        pendingQueueRequests = 0
         music?.appWillResignActive()
         if mode == .spotify { auth.signOut() }
         music = nil
         playlists = []
         libraryState = .idle
         mode = .signedOut
+    }
+
+    // MARK: Daily Five
+
+    func prepareDailyFive() async {
+        guard dailyFive == nil, let music else { return }
+        dailyFiveError = nil
+        do {
+            let accountID = try await music.accountID()
+            guard self.music === music, dailyFive == nil, !Task.isCancelled else { return }
+            dailyFive = DailyFive(accountID: accountID)
+            #if DEBUG
+            if mode == .preview, ProcessInfo.processInfo.arguments.contains("-dailyFiveSample"),
+               let dailyFive, dailyFive.sourceIDs.isEmpty {
+                dailyFive.setSources(Array(playlists.filter(\.isMine).prefix(3)))
+            }
+            #endif
+        } catch {
+            guard self.music === music, !Task.isCancelled else { return }
+            dailyFiveError = error.localizedDescription
+        }
+    }
+
+    func add(_ tracks: [Track], to playlist: Playlist) async {
+        guard let music, !tracks.isEmpty else { return }
+        do {
+            try await music.add(tracks.map(\.uri), to: playlist)
+            guard self.music === music else { return }
+            if let index = playlists.firstIndex(where: { $0.id == playlist.id }) {
+                playlists[index].trackCount = (playlists[index].trackCount ?? 0) + tracks.count
+            }
+            show("Added \(tracks.count) songs to \(playlist.name)")
+        } catch {
+            guard self.music === music else { return }
+            show(error.localizedDescription)
+        }
+    }
+
+    // MARK: Queue
+
+    func enqueue(_ tracks: [Track]) {
+        enqueue { _ in tracks }
+    }
+
+    func enqueue(_ playlist: Playlist) {
+        enqueue { music in try await music.tracks(in: playlist) }
+    }
+
+    func enqueueAlbum(_ album: CatalogItem) {
+        enqueue { music in try await music.albumPage(album).tracks }
+    }
+
+    /// Serialize taps and whole collections, preserving their requested order.
+    /// Stop at the first error; never retry a possibly accepted addition.
+    private func enqueue(_ load: @escaping (any MusicService) async throws -> [Track]) {
+        guard let music else { return }
+        let previous = enqueueTask
+        pendingQueueRequests += 1
+        enqueueTask = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled, self.music === music else { return }
+            defer { if self.music === music { self.pendingQueueRequests -= 1 } }
+            var added = 0
+            do {
+                let tracks = try await load(music)
+                guard !Task.isCancelled, self.music === music else { return }
+                guard !tracks.isEmpty else { self.show("No songs available to add."); return }
+                if tracks.count > 1 { self.show("Adding \(tracks.count) songs to queue…") }
+                for track in tracks {
+                    guard !Task.isCancelled, self.music === music else { return }
+                    try await music.enqueue(track)
+                    guard !Task.isCancelled, self.music === music else { return }
+                    added += 1
+                    self.queueRevision += 1
+                }
+                self.show(added == 1 ? "Added to queue" : "Added \(added) songs to queue")
+            } catch {
+                guard !Task.isCancelled, self.music === music else { return }
+                let prefix = added > 0 ? "Added \(added) songs, then stopped. " : ""
+                self.show(Notice(text: prefix + error.localizedDescription,
+                                 opensSpotify: (error as? SpotifyAPI.APIError)?.isNoActiveDevice == true))
+            }
+        }
     }
 
     // MARK: Library

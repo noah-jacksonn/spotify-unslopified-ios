@@ -17,7 +17,7 @@ struct Playlist: Identifiable, Hashable {
     var isCollaborativeGuest = false
 }
 
-struct Track: Identifiable, Hashable {
+struct Track: Identifiable, Hashable, Codable {
     var id: String
     var name: String
     var artists: String
@@ -27,16 +27,21 @@ struct Track: Identifiable, Hashable {
     var uri: String
     var demoSeed: Int?
     var artistIDs: [String] = []
+    var artistNames: [String] = []
+    var recordingID: String? = nil
     /// Position on its album; shown on album pages.
     var number: Int? = nil
     /// Index in the playlist or album it was loaded from (see
     /// `PlayRequest.context`).
     var position: Int? = nil
+    var albumItem: CatalogItem? = nil
+    /// Keep unavailable tracks visible in their source lists, but don't recommend them.
+    var isPlayable: Bool? = nil
 }
 
 /// A search hit that isn't a track: an album, artist, or playlist.
-struct CatalogItem: Identifiable, Hashable {
-    enum Kind { case album, artist, playlist }
+struct CatalogItem: Identifiable, Hashable, Codable {
+    enum Kind: String, Codable { case album, artist, playlist }
     var id: String
     var kind: Kind
     var name: String
@@ -60,6 +65,12 @@ struct AlbumPage {
     var artists: [CatalogItem]
     var year: String?
     var tracks: [Track]
+}
+
+struct PlaybackQueue {
+    var current: Track?
+    /// Keep duplicate occurrences in their reported order.
+    var upcoming: [Track]
 }
 
 struct SearchResults {
@@ -100,6 +111,8 @@ struct NowPlaying: Equatable {
     var speed: Double = 1
     /// The (first) artist, so the full player can open their page.
     var artistItem: CatalogItem? = nil
+    /// The recording's album, independent of its current playlist/context.
+    var albumItem: CatalogItem? = nil
 
     /// Spoken content (a podcast episode or audiobook chapter), which unlike
     /// music has a playback speed.
@@ -124,6 +137,13 @@ struct NowPlaying: Equatable {
 }
 
 extension CatalogItem {
+    static func spotifyAlbum(uri: String, name: String, artist: String, imageURL: URL? = nil) -> CatalogItem? {
+        let prefix = "spotify:album:"
+        guard uri.hasPrefix(prefix), uri.count > prefix.count else { return nil }
+        return CatalogItem(id: String(uri.dropFirst(prefix.count)), kind: .album, name: name,
+                           subtitle: artist, imageURL: imageURL, uri: uri)
+    }
+
     /// A Spotify artist, from their id or `spotify:artist:` URI.
     static func spotifyArtist(id: String, name: String, imageURL: URL? = nil) -> CatalogItem {
         CatalogItem(id: id, kind: .artist, name: name, subtitle: "Artist", imageURL: imageURL, uri: "spotify:artist:\(id)")

@@ -15,6 +15,7 @@ final class SpotifyAuth {
         /// Space-separated scopes Spotify granted; nil for tokens saved
         /// before this was recorded.
         var scope: String?
+        var accountID: String? = nil
     }
 
     enum AuthError: LocalizedError {
@@ -42,6 +43,13 @@ final class SpotifyAuth {
     private var refreshTask: Task<Tokens, Error>?
 
     var isSignedIn: Bool { tokens != nil }
+    var sessionID: Int { generation }
+
+    func rememberAccountID(_ id: String, for sessionID: Int) {
+        guard generation == sessionID, var tokens else { return }
+        tokens.accountID = id
+        store(tokens)
+    }
 
     /// Whether this sign-in covers the scopes added after first release.
     /// Checks only those, not every scope: if Spotify ever left one out of
@@ -177,7 +185,8 @@ final class SpotifyAuth {
             accessToken: access,
             refreshToken: refresh,
             expiresAt: Date().addingTimeInterval(body.expires_in ?? 3600),
-            scope: body.scope ?? tokens?.scope
+            scope: body.scope ?? tokens?.scope,
+            accountID: tokens?.accountID
         )
     }
 

@@ -12,8 +12,10 @@ struct SignInView: View {
             Spacer()
             BarsMark(color: look.palette.accent, size: 54, playing: true)
                 .padding(.bottom, 28)
-            Text("Focused")
-                .font(look.display(44))
+            Text("Spotify Unslopified")
+                .font(look.display(32))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .tracking(look.titleTracking)
                 .foregroundStyle(look.palette.text)
             Text("Your music, without the feed.")
@@ -30,7 +32,7 @@ struct SignInView: View {
             }
             Button(action: signIn) {
                 HStack {
-                    if isSigningIn { ProgressView().tint(look.palette.onAccent) }
+                    if isSigningIn { BarsLoader(size: 16, color: look.palette.onAccent, delay: .zero) }
                     Text("Connect Spotify")
                 }
                 .font(look.font(17, .semibold))

@@ -26,6 +26,7 @@ struct MiniPlayer: View {
                     music.togglePause()
                 }
                 button("forward.fill", "Next", size: 18, width: 36) { music.next() }
+                QueueButton()
             }
             .padding(.horizontal, look.margin)
             .padding(.vertical, 10)

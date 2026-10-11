@@ -43,6 +43,9 @@ protocol MusicService: AnyObject {
     /// Set by AppModel; the service reports user-facing problems here.
     var onNotice: ((Notice) -> Void)? { get set }
 
+    func prepareForPlayback(_ tracks: [Track])
+    func accountID() async throws -> String
+    func discoveryTracks(for artist: CatalogItem, rotation: Int) async throws -> [Track]
     func loadPlaylists() async throws -> [Playlist]
     func tracks(in playlist: Playlist) async throws -> [Track]
     func search(_ query: String) async throws -> SearchResults
@@ -53,6 +56,9 @@ protocol MusicService: AnyObject {
     func deletePlaylist(_ playlist: Playlist) async throws
     /// Removes every copy of each song.
     func remove(_ trackURIs: [String], from playlist: Playlist) async throws
+
+    func playbackQueue() async throws -> PlaybackQueue
+    func enqueue(_ track: Track) async throws
 
     func play(_ request: PlayRequest)
     /// Plays the context from a random song with shuffle turned on.
@@ -76,6 +82,7 @@ protocol MusicService: AnyObject {
 }
 
 extension MusicService {
+    func prepareForPlayback(_ tracks: [Track]) {}
     /// No speed control unless a service provides one (the preview doesn't).
     var podcastSpeeds: [Double] { [] }
     func setPodcastSpeed(_ value: Double) {}

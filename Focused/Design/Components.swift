@@ -24,6 +24,29 @@ struct BarsMark: View {
     }
 }
 
+/// The app's loader: its three bars, moving. Muted and small by default,
+/// and it waits `delay` before fading in, so a quick load shows nothing
+/// (Noah, 2026-10-03: subtle, and used everywhere instead of spinners).
+struct BarsLoader: View {
+    var size: CGFloat = 22
+    var color: Color?
+    var delay: Duration = .milliseconds(400)
+    @Environment(\.look) private var look
+    @State private var visible = false
+
+    var body: some View {
+        BarsMark(color: color ?? look.palette.muted.opacity(0.6), size: size, playing: visible)
+            .opacity(visible ? 1 : 0)
+            .animation(look.animation, value: visible)
+            .task {
+                if delay > .zero { try? await Task.sleep(for: delay) }
+                visible = true
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Loading")
+    }
+}
+
 struct CircleIconButton: View {
     var systemName: String
     var label: String
@@ -87,13 +110,15 @@ struct SectionTitle: View {
 }
 
 /// A song row: small art (or its number), name, artists, the playing
-/// indicator when it's the current song, and optionally a + to add it to a
-/// playlist.
+/// indicator when it's the current song, and an options menu for queue and
+/// playlist additions.
 struct TrackRow: View {
     var track: Track
     /// Album pages show the track number in place of (identical) artwork.
     var showsNumber = false
-    var showsAddMenu = false
+    var showsAddMenu = true
+    var swipeToQueue = true
+    var onRemove: (() -> Void)? = nil
     var action: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
@@ -106,6 +131,8 @@ struct TrackRow: View {
             row
             if showsAddMenu { AddToPlaylistMenu(track: track) }
         }
+        .queueOnSwipe(track, enabled: swipeToQueue)
+        .songContextMenu(track, play: action, remove: onRemove)
     }
 
     private var row: some View {
@@ -248,6 +275,9 @@ struct ContextPlayControls: View {
                 PlayPill { model.music?.play(.context(uri: contextURI)) }
             }
             if !tracks.isEmpty {
+                CircleIconButton(systemName: "text.badge.plus", label: "Add all songs to queue") {
+                    model.enqueue(tracks)
+                }
                 CircleIconButton(systemName: "shuffle", label: "Shuffle") {
                     if let random = tracks.randomElement() {
                         model.music?.shuffle(.context(uri: contextURI, startAt: random.uri, position: random.position))

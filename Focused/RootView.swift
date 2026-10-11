@@ -61,12 +61,14 @@ struct MainView: View {
     @State private var showsLibrary = false
     @State private var showsNowPlaying = false
     @State private var openedDebugScreen = false
+    @State private var showsQueue = false
 
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(showsLibrary: $showsLibrary)
                 .appDestinations()
         }
+        .songAlbumNavigation(path: $path)
         .playerBar(isCovered: showsLibrary, showsFullPlayer: $showsNowPlaying)
         .noticeOverlay()
         .sheet(isPresented: $showsLibrary) {
@@ -74,11 +76,22 @@ struct MainView: View {
                 .environment(\.look, look)
                 .noticeOverlay()
         }
+        .sheet(isPresented: $showsQueue) {
+            QueueSheet().environment(\.look, look).noticeOverlay()
+        }
         .task(id: model.mode) {
             await model.loadLibrary()
+            // Restore the account's saved covers on Home, before Discover is opened.
+            await model.prepareDailyFive()
             if !openedDebugScreen {
                 openedDebugScreen = true
                 openDebugScreen()
+            }
+            // Only opted-in sources can generate an edition. Keep the previous
+            // edition's covers visible while today's picks are being prepared.
+            if !Task.isCancelled, model.libraryState == .loaded,
+               let daily = model.dailyFive, let music = model.music {
+                await daily.load(using: music, playlists: model.playlists)
             }
         }
     }
@@ -95,6 +108,8 @@ struct MainView: View {
                 if arguments.contains("-openPlaylist") { path.append(first) }
             }
         }
+        if arguments.contains("-openDailyFive") { path.append(DailyFiveRoute()) }
+        if arguments.contains("-openQueue") { showsQueue = true }
         if arguments.contains("-openLibrary") { showsLibrary = true }
         if arguments.contains("-openArtist") || arguments.contains("-openAlbum") {
             // The first artist a search turns up, or that artist's first album.
@@ -108,7 +123,7 @@ struct MainView: View {
                 }
             }
         }
-        if arguments.contains("-openNowPlaying") {
+        if arguments.contains("-openNowPlaying") || arguments.contains("-openLyrics") || arguments.contains("-liveLyrics") || arguments.contains("-openPlayerArtist") || arguments.contains("-openPlayerAlbum") {
             if model.music?.nowPlaying == nil, let first = model.playlists.first {
                 model.music?.play(.context(uri: first.uri))
             }
@@ -122,16 +137,23 @@ extension View {
     /// Every destination a navigation stack in the app can push. Applied to
     /// each stack so they stay in step.
     func appDestinations() -> some View {
-        navigationDestination(for: Playlist.self) { PlaylistView(playlist: $0) }
+        navigationDestination(for: DailyFiveRoute.self) { _ in DailyFiveView() }
+            .navigationDestination(for: Playlist.self) { PlaylistView(playlist: $0) }
             .navigationDestination(for: CatalogItem.self) { CatalogPage(item: $0) }
+    }
+
+    /// Apply outside NavigationStack so pushed destinations and their menus
+    /// inherit the action, not only the stack's initial content.
+    func songAlbumNavigation(path: Binding<NavigationPath>) -> some View {
+        environment(\.openSongAlbum, { path.wrappedValue.append($0) })
     }
 
     /// The mini player docked at the bottom, opening the full player. On
     /// the main screen and inside the library sheet, which would otherwise
     /// cover it. `isCovered` skips drawing a bar a sheet is hiding;
     /// `showsFullPlayer` lets a caller open the player itself.
-    func playerBar(isCovered: Bool = false, showsFullPlayer: Binding<Bool>? = nil) -> some View {
-        modifier(PlayerBar(isCovered: isCovered, external: showsFullPlayer))
+    func playerBar(isCovered: Bool = false, showsFullPlayer: Binding<Bool>? = nil, onOpen: (() -> Void)? = nil) -> some View {
+        modifier(PlayerBar(isCovered: isCovered, external: showsFullPlayer, onOpen: onOpen))
     }
 
     /// The app's notice capsule. Applied to the main screen and to each
@@ -144,6 +166,7 @@ extension View {
 private struct PlayerBar: ViewModifier {
     var isCovered: Bool
     var external: Binding<Bool>?
+    var onOpen: (() -> Void)?
     @State private var showsOwn = false
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
@@ -151,13 +174,18 @@ private struct PlayerBar: ViewModifier {
     private var showsFullPlayer: Binding<Bool> { external ?? $showsOwn }
 
     func body(content: Content) -> some View {
-        content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isCovered, let music = model.music, let state = music.nowPlaying {
-                    MiniPlayer(state: state, music: music) { showsFullPlayer.wrappedValue = true }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+        // Give the navigation content its own shorter viewport. An outer
+        // safeAreaInset can be lost when a pushed List resolves its margins,
+        // leaving its final row behind the player.
+        VStack(spacing: 0) {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !isCovered, let music = model.music, let state = music.nowPlaying {
+                MiniPlayer(state: state, music: music) {
+                    if let onOpen { onOpen() } else { showsFullPlayer.wrappedValue = true }
                 }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
             .animation(look.animation, value: model.music?.nowPlaying == nil)
             .sheet(isPresented: showsFullPlayer) {
                 if let music = model.music {

@@ -42,11 +42,13 @@ struct Look {
     let margin: CGFloat = 20
     let hairline: CGFloat = 0.5
 
-    func artRadius(_ size: CGFloat) -> CGFloat { size * 0.32 }
+    func artRadius(_ size: CGFloat) -> CGFloat { size * 0.24 }
 
     // MARK: Motion
 
     let animation: Animation = .easeInOut(duration: 0.35)
+    /// Frequent lyric changes should settle quickly without snapping.
+    let lyricAnimation: Animation = .easeOut(duration: 0.16)
 
     // MARK: Palettes
 
