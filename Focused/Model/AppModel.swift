@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @Observable
 final class AppModel {
@@ -8,6 +9,7 @@ final class AppModel {
     let auth = SpotifyAuth()
     /// Outlives player sheets so closing a song doesn't discard its lyrics.
     let lyrics = LyricsState()
+    let sleepTimer: SleepTimer
     private(set) var mode: Mode = .signedOut
     private(set) var music: (any MusicService)?
     private(set) var playlists: [Playlist] = []
@@ -28,6 +30,9 @@ final class AppModel {
     private var deletedIDs: Set<String> = []
 
     init() {
+        sleepTimer = SleepTimer(auth: auth)
+        sleepTimer.music = { [weak self] in self?.music }
+        sleepTimer.usesSpotify = { [weak self] in self?.mode == .spotify }
         auth.onExpired = { [weak self] in
             guard let self, self.mode == .spotify else { return }
             self.signOut()
@@ -89,8 +94,13 @@ final class AppModel {
         playlists = []
         libraryState = .idle
         // The scene is usually already active, so its phase change won't
-        // come; connect to Spotify now.
-        music.appBecameActive()
+        // come; connect to Spotify now. Not when iOS launched the app in
+        // the background for the sleep timer: RootView connects once it's
+        // opened.
+        DispatchQueue.main.async { [weak self] in
+            guard self?.music === music, UIApplication.shared.applicationState != .background else { return }
+            music.appBecameActive()
+        }
     }
 
     func show(_ message: String) { show(Notice(text: message)) }
@@ -118,6 +128,7 @@ final class AppModel {
         enqueueTask?.cancel()
         enqueueTask = nil
         pendingQueueRequests = 0
+        sleepTimer.cancel()
         music?.appWillResignActive()
         if mode == .spotify { auth.signOut() }
         music = nil

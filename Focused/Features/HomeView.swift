@@ -11,6 +11,9 @@ struct HomeView: View {
     @State private var isSearching = false
     @State private var query = ""
     @State private var isLoadingResults = false
+    @State private var barsTaps = 0
+    @State private var barsPressed = false
+    @State private var showsSleepTimer = false
     @FocusState private var searchFocused: Bool
     @Namespace private var morph
 
@@ -40,9 +43,14 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .pageBackground()
         .animation(look.animation, value: model.home.ids)
+        .sheet(isPresented: $showsSleepTimer) {
+            SleepTimerSheet().environment(\.look, look)
+        }
         .onAppear {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-openSearch"), !isSearching { setSearching(true) }
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-openSearch"), !isSearching { setSearching(true) }
+            if arguments.contains("-openSleepTimer") { showsSleepTimer = true }
             #endif
         }
     }
@@ -79,24 +87,20 @@ struct HomeView: View {
             .frame(height: 44)
             if !isSearching {
                 HStack(alignment: .center, spacing: 12) {
-                    Button { model.music?.togglePause() } label: {
-                        BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(-7)
-                    .disabled(model.music?.nowPlaying == nil)
-                    .accessibilityLabel(isPlaying ? "Pause" : "Play")
-                    .accessibilityHint("Controls the current song")
-                    .accessibilityIdentifier("home.playbackToggle")
+                    barsButton
                     Text("Spotify Unslopified")
                         .font(look.display(28))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .tracking(look.titleTracking)
                         .foregroundStyle(look.palette.text)
+                    Spacer(minLength: 0)
+                    if let endsAt = model.sleepTimer.endsAt {
+                        sleepBadge(endsAt)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
                 }
+                .animation(look.animation, value: model.sleepTimer.endsAt == nil)
                 .transition(.opacity.combined(with: .offset(y: -12)))
             }
         }
@@ -123,6 +127,56 @@ struct HomeView: View {
         .accessibilityLabel("Search")
     }
 
+    /// The wordmark's moving bars double as play/pause, and a long press
+    /// opens the sleep timer (Noah, 2026-10-03). A tap is inert when
+    /// nothing is loaded, so a stray one never starts music. Gestures, not
+    /// a Button: a Button would also fire its tap at the end of a long
+    /// press.
+    private var barsButton: some View {
+        BarsMark(color: look.palette.accent, size: 30, playing: isPlaying)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .scaleEffect(barsPressed ? 0.95 : 1)
+            .opacity(barsPressed ? 0.85 : 1)
+            .animation(.easeOut(duration: 0.15), value: barsPressed)
+            .onTapGesture(perform: tapBars)
+            .onLongPressGesture(minimumDuration: 0.4) {
+                showsSleepTimer = true
+            } onPressingChanged: { barsPressed = $0 }
+            .sensoryFeedback(.impact(weight: .light), trigger: barsTaps)
+            .sensoryFeedback(.impact(weight: .medium), trigger: showsSleepTimer) { _, shown in shown }
+            .padding(-7)
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(isPlaying ? "Pause" : "Play")
+            .accessibilityHint("Controls the current song; touch and hold for the sleep timer")
+            .accessibilityIdentifier("home.playbackToggle")
+            .accessibilityAction { tapBars() }
+            .accessibilityAction(named: "Sleep timer") { showsSleepTimer = true }
+    }
+
+    private func tapBars() {
+        guard let music = model.music, music.nowPlaying != nil else { return }
+        music.togglePause()
+        barsTaps += 1
+    }
+
+    /// Time left on the sleep timer, beside the wordmark; tap to change it.
+    private func sleepBadge(_ endsAt: Date) -> some View {
+        Button { showsSleepTimer = true } label: {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Label(SleepTimerSheet.short(endsAt.timeIntervalSince(context.date)), systemImage: "moon.zzz.fill")
+                    .font(look.font(14, .semibold).monospacedDigit())
+                    .foregroundStyle(look.palette.muted)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .surface(look, in: Capsule())
+            }
+        }
+        .buttonStyle(PressScale())
+        .accessibilityLabel("Sleep timer")
+    }
+
     private var isPlaying: Bool { model.music?.nowPlaying.map { !$0.isPaused } ?? false }
 
     private var isLoading: Bool {
@@ -131,6 +185,7 @@ struct HomeView: View {
 
     private var accountMenu: some View {
         Menu {
+            Button("Sleep timer", systemImage: "moon.zzz") { showsSleepTimer = true }
             if model.mode == .preview {
                 Label("Previewing sample music", systemImage: "sparkles")
                 Button("Leave preview", systemImage: "arrow.uturn.left") { model.signOut() }
@@ -218,7 +273,8 @@ struct HomeView: View {
 }
 
 /// Home's playlists: 88 pt round-cornered art beside the name, like the
-/// extension's Home. Long-press for Play, Move to top, Remove from Home.
+/// extension's Home. Swipe right to play, left to shuffle; long-press for
+/// Play, Move to top, Remove from Home.
 private struct PlaylistList: View {
     var playlists: [Playlist]
     @Environment(AppModel.self) private var model
@@ -243,10 +299,23 @@ private struct PlaylistList: View {
                         deleting = playlist
                     }
                 }
+                .rowSwipes(
+                    leading: RowSwipe(systemName: "play.fill", label: "Play") {
+                        model.music?.play(.context(uri: playlist.uri))
+                    },
+                    trailing: RowSwipe(systemName: "shuffle", label: "Shuffle") { shuffle(playlist) }
+                )
             }
         }
         .deletePlaylistConfirmation($deleting)
         .padding(.horizontal, look.margin)
+    }
+
+    /// Starts at a random song, as the playlist page's Shuffle does. Home
+    /// doesn't load the songs, so it picks a position from the count.
+    private func shuffle(_ playlist: Playlist) {
+        let position = playlist.trackCount.flatMap { $0 > 0 ? Int.random(in: 0..<$0) : nil }
+        model.music?.shuffle(.context(uri: playlist.uri, position: position))
     }
 
     private func row(_ playlist: Playlist) -> some View {

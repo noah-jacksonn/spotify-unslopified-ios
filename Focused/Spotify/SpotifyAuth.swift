@@ -147,12 +147,29 @@ final class SpotifyAuth {
         Keychain.delete()
     }
 
+    /// Takes tokens the sleep timer refreshed while the app was in the
+    /// background, if they came from this sign-in's refresh token.
+    func adopt(_ fresh: Tokens, refreshedFrom refreshToken: String) {
+        guard tokens?.refreshToken == refreshToken else { return }
+        store(fresh)
+    }
+
     private func store(_ tokens: Tokens) {
         self.tokens = tokens
         Keychain.save(tokens)
     }
 
-    private func requestTokens(_ form: [String: String], keepingRefreshToken: String?) async throws -> Tokens {
+    /// The refresh call, for the sleep timer to send from its background
+    /// session; `decodeTokens` reads the reply.
+    static func refreshRequest(_ refreshToken: String) -> URLRequest {
+        tokenRequest([
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": Config.clientID,
+        ])
+    }
+
+    private static func tokenRequest(_ form: [String: String]) -> URLRequest {
         var request = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -160,7 +177,16 @@ final class SpotifyAuth {
             .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .formValue) ?? "")" }
             .joined(separator: "&")
             .data(using: .utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        return request
+    }
+
+    private func requestTokens(_ form: [String: String], keepingRefreshToken: String?) async throws -> Tokens {
+        let (data, response) = try await URLSession.shared.data(for: Self.tokenRequest(form))
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return try Self.decodeTokens(data, status: status, keepingRefreshToken: keepingRefreshToken, scope: tokens?.scope, accountID: tokens?.accountID)
+    }
+
+    static func decodeTokens(_ data: Data, status: Int, keepingRefreshToken: String?, scope: String?, accountID: String? = nil) throws -> Tokens {
         struct Body: Decodable {
             var access_token: String?
             var refresh_token: String?
@@ -168,7 +194,6 @@ final class SpotifyAuth {
             var scope: String?
             var error: String?
         }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let body = try? JSONDecoder().decode(Body.self, from: data)
         guard (200..<300).contains(status), let body, let access = body.access_token else {
             // Only a rejected grant or client means the sign-in is dead;
@@ -185,8 +210,8 @@ final class SpotifyAuth {
             accessToken: access,
             refreshToken: refresh,
             expiresAt: Date().addingTimeInterval(body.expires_in ?? 3600),
-            scope: body.scope ?? tokens?.scope,
-            accountID: tokens?.accountID
+            scope: body.scope ?? scope,
+            accountID: accountID
         )
     }
 

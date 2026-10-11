@@ -22,6 +22,7 @@
 #   scripts/run-on-iphone.sh --lyrics        open full lyrics for the current song
 #   scripts/run-on-iphone.sh --live-lyrics   show the current line in the player
 #   scripts/run-on-iphone.sh --now-playing   open the full player (starts music)
+#   scripts/run-on-iphone.sh --sleep         open the sleep timer
 #   scripts/run-on-iphone.sh --console       stream stdout/stderr (combinable)
 #
 # Screen flags open the app directly on the surface under test, backed by
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
     --now-playing) APP_ARGS+=(-openNowPlaying) ;;
     --lyrics) APP_ARGS+=(-openLyrics) ;;
     --live-lyrics) APP_ARGS+=(-liveLyrics) ;;
+    --sleep) APP_ARGS+=(-openSleepTimer) ;;
     *) echo "✗ Unknown option: $1" >&2; exit 1 ;;
   esac
   shift

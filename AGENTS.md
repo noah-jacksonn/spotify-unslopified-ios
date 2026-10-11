@@ -7,11 +7,12 @@ Spotify Unslopified is a native SwiftUI remote for Spotify: a quiet Home of play
 - Sign-in is Authorization Code with PKCE (`Focused/Spotify/SpotifyAuth.swift`). No client secret, no backend. Tokens live in the Keychain. Client ID and scopes are in `Focused/Config.swift`; the dashboard app must list `focusedspotify://callback` and have Web API + iOS enabled.
 - The Web API (`SpotifyAPI.swift`) covers library, playlist items, search and player commands. It targets the February 2026 development-mode API: playlist contents via `/playlists/{id}/items` (`items[].item`), only for playlists the user owns or collaborates on (others return metadata only, and the UI says so); search returns at most 10 per type; dev mode allows 5 users and needs Premium.
 - Audio always plays in the Spotify app. `SpotifyMusic` drives it through the iOS SDK (App Remote) when connected, else the Web API, else wakes Spotify with `authorizeAndPlayURI`. Keep that fallback order.
+- The sleep timer (`SleepTimer.swift`) pauses through a background URLSession, since iOS freezes the app once the phone locks: the pause request is scheduled for the end time, preceded by token refreshes for timers longer than the token's hour. It needs no background mode, but doesn't survive the app being swiped away.
 - `DemoMusic` is the sample-music preview ("Try with sample music", or the `-preview` launch argument). It exists so designs can be tested without Spotify; keep it working when screens change.
 
 ## Design system
 
-- The look is locked in from Noah's on-phone segtest (2026-10-02): Ink palette, SF Rounded, a soft accent glow behind pages, calm 0.35 s easing, a List Home with 88 pt round-cornered art, the wordmark header, airy spacing, a full-width Bar mini player and the Poster full player. It lives in `Focused/Design/Look.swift` and is read from `@Environment(\.look)`. Screens use `look.palette`, `look.font`/`look.display`, `look.artRadius`, `.surface(look, in:)`, `look.animation`; never hard-code colors or fonts.
+- The look is locked in from Noah's on-phone segtest (2026-10-02): Ink palette, SF Rounded, a soft glow behind pages (colored from the current song's art since 2026-10-03, the accent when nothing plays; `look.glow`), calm 0.35 s easing, a List Home with 88 pt round-cornered art, the wordmark header, airy spacing, a full-width Bar mini player and the Poster full player. It lives in `Focused/Design/Look.swift` and is read from `@Environment(\.look)`. Screens use `look.palette`, `look.font`/`look.display`, `look.artRadius`, `.surface(look, in:)`, `look.animation`; never hard-code colors or fonts.
 - Deployment target is iOS 26 (Noah's phone), so iOS 26 APIs (Liquid Glass, MeshGradient) are available without availability checks.
 
 ## Segtest
@@ -28,7 +29,7 @@ Files that should exist only in Debug builds start with `Debug`; Release exclude
 xcodebuild -project Focused.xcodeproj -scheme Focused -destination 'generic/platform=iOS Simulator' build
 ```
 
-After a user-testable change, run `scripts/run-on-iphone.sh`. It builds, installs and launches on Noah's iPhone. If the phone is unavailable or locked, say so and tell Noah to run from Xcode. Screen flags open the app on the surface under test: `--preview`, `--search`, `--library`, `--playlist`, `--play`, `--now-playing`, `--artist`, `--album`, `--loader`, `--cover`, `--queue`, `--daily-five`, `--lyrics`. Add a flag (backed by a Debug launch argument in `MainView.openDebugScreen`) for each new surface Noah tests.
+After a user-testable change, run `scripts/run-on-iphone.sh`. It builds, installs and launches on Noah's iPhone. If the phone is unavailable or locked, say so and tell Noah to run from Xcode. Screen flags open the app on the surface under test: `--preview`, `--search`, `--library`, `--playlist`, `--play`, `--now-playing`, `--artist`, `--album`, `--loader`, `--cover`, `--queue`, `--daily-five`, `--lyrics`, `--sleep`. Add a flag (backed by a Debug launch argument in `MainView.openDebugScreen`) for each new surface Noah tests.
 
 Signing: Harmony Mental Health, LLC team (`4X89BKDS2G`, the paid account), bundle ID `com.harmonyappai.FocusedSpotify`. Development installs last about a year; re-run the script to renew.
 
