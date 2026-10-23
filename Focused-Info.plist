@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>SpotifyClientID</key>
+	<string>$(SPOTIFY_CLIENT_ID)</string>
 	<!-- Spotify sends the user back here after sign-in and after the
 	     Spotify app is woken to start playback. Must match the redirect URI
 	     registered on the Spotify developer dashboard (Config.redirectURI). -->

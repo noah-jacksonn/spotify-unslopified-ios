@@ -3,9 +3,9 @@ import Foundation
 /// Spotify developer app settings. The dashboard app must list
 /// `redirectURI` exactly, and have both "Web API" and "iOS" enabled.
 enum Config {
-    /// developer.spotify.com/dashboard → Focused Spotify → Settings. A
-    /// Client ID is public by design; PKCE means no client secret is used.
-    static let clientID = "356a1f5dec784635bf89fb4272a86abf"
+    /// Supplied by Configuration/Local.xcconfig; public by design (PKCE).
+    static let clientID = Bundle.main.object(forInfoDictionaryKey: "SpotifyClientID") as? String ?? ""
+    static var isConfigured: Bool { clientID.count == 32 && clientID.allSatisfy(\.isHexDigit) }
 
     static let redirectURI = "focusedspotify://callback"
     static let callbackScheme = "focusedspotify"

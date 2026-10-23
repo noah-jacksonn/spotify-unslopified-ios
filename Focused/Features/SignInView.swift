@@ -69,6 +69,10 @@ struct SignInView: View {
     }
 
     private func signIn() {
+        guard Config.isConfigured else {
+            model.signInError = "Add your Spotify Client ID in Configuration/Local.xcconfig, then rebuild. You can try sample music below."
+            return
+        }
         Task {
             isSigningIn = true
             defer { isSigningIn = false }

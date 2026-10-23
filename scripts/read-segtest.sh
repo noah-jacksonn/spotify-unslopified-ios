@@ -12,8 +12,13 @@
 #   scripts/read-segtest.sh <id>       only one segtest's picks
 set -e
 
-COREDEVICE_ID="BF5B23E2-66F6-5CA2-8075-A22B8907BFEE"  # Noah's iPhone 17 Pro
-BUNDLE_ID="com.harmonyappai.FocusedSpotify"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$PROJECT_DIR/scripts/device.local.sh" ]; then
+  source "$PROJECT_DIR/scripts/device.local.sh"
+fi
+: "${COREDEVICE_ID:=${DEVICE_UDID:-}}"
+: "${BUNDLE_ID:?Set BUNDLE_ID to your app's bundle identifier}"
+: "${COREDEVICE_ID:?Set COREDEVICE_ID or DEVICE_UDID to your iPhone ID}"
 FILTER="segtest.pick.${1:+$1.}"
 
 TMP="$(mktemp -d)"

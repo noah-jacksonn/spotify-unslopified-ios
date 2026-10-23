@@ -1,0 +1,4 @@
+// Copy this file to Local.xcconfig and fill in your own values.
+SPOTIFY_CLIENT_ID = paste_your_spotify_client_id_here
+DEVELOPMENT_TEAM = your_apple_team_id
+FOCUSED_BUNDLE_ID = com.yourname.SpotifyUnslopified

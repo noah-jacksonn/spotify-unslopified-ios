@@ -4,7 +4,7 @@ Spotify Unslopified is a native SwiftUI remote for Spotify: a quiet Home of play
 
 ## How it talks to Spotify
 
-- Sign-in is Authorization Code with PKCE (`Focused/Spotify/SpotifyAuth.swift`). No client secret, no backend. Tokens live in the Keychain. Client ID and scopes are in `Focused/Config.swift`; the dashboard app must list `focusedspotify://callback` and have Web API + iOS enabled.
+- Sign-in is Authorization Code with PKCE (`Focused/Spotify/SpotifyAuth.swift`). No client secret, no backend. Tokens live in the Keychain. Client ID is supplied by ignored `Configuration/Local.xcconfig`; scopes are in `Focused/Config.swift`; the dashboard app must list `focusedspotify://callback` and have Web API + iOS enabled.
 - The Web API (`SpotifyAPI.swift`) covers library, playlist items, search and player commands. It targets the February 2026 development-mode API: playlist contents via `/playlists/{id}/items` (`items[].item`), only for playlists the user owns or collaborates on (others return metadata only, and the UI says so); search returns at most 10 per type; dev mode allows 5 users and needs Premium.
 - Audio always plays in the Spotify app. `SpotifyMusic` drives it through the iOS SDK (App Remote) when connected, else the Web API, else wakes Spotify with `authorizeAndPlayURI`. Keep that fallback order.
 - The sleep timer (`SleepTimer.swift`) pauses through a background URLSession, since iOS freezes the app once the phone locks: the pause request is scheduled for the end time, preceded by token refreshes for timers longer than the token's hour. It needs no background mode, but doesn't survive the app being swiped away.

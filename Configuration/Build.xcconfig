@@ -1,0 +1,4 @@
+// Shared defaults. Personal values belong in the ignored Local.xcconfig.
+SPOTIFY_CLIENT_ID =
+FOCUSED_BUNDLE_ID = com.example.SpotifyUnslopified
+#include? "Local.xcconfig"

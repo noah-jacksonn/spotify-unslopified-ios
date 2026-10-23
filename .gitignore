@@ -3,3 +3,11 @@ xcuserdata/
 build/
 DerivedData/
 *.xcuserstate
+
+# Personal Spotify / signing configuration
+Configuration/Local.xcconfig
+.env
+.env.*
+*.p12
+*.mobileprovision
+scripts/device.local.sh

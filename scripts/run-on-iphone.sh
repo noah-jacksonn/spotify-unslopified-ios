@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build Focused for Noah's iPhone, install it, and launch it — Cmd+R without
+# Build Focused for a connected iPhone, install it, and launch it — Cmd+R without
 # Xcode. Adapted from harmony-ios. Requires the phone to be connected (cable
 # or paired Wi-Fi) and unlocked for the install step.
 #
@@ -60,10 +60,17 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-DEVICE_UDID="00008150-001A69540C23C01C"           # Noah's iPhone 17 Pro
-COREDEVICE_ID="BF5B23E2-66F6-5CA2-8075-A22B8907BFEE"
-BUNDLE_ID="com.harmonyappai.FocusedSpotify"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Optional personal device defaults, never committed.
+if [ -f "$PROJECT_DIR/scripts/device.local.sh" ]; then
+  source "$PROJECT_DIR/scripts/device.local.sh"
+fi
+if [ -z "${DEVICE_UDID:-}" ]; then
+  echo 'Set DEVICE_UDID to your iPhone ID from: xcrun xctrace list devices' >&2
+  echo 'Or select your iPhone in Xcode and press Cmd+R.' >&2
+  exit 1
+fi
+COREDEVICE_ID="${COREDEVICE_ID:-$DEVICE_UDID}"
 
 cd "$PROJECT_DIR"
 
@@ -86,6 +93,8 @@ if [ ! -d "$APP_PATH" ]; then
   echo "✗ Build product not found at $APP_PATH" >&2
   exit 1
 fi
+
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_PATH/Info.plist")"
 
 echo "▸ Installing on iPhone…"
 xcrun devicectl device install app --device "$COREDEVICE_ID" "$APP_PATH"
