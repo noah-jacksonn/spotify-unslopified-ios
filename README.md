@@ -3,9 +3,9 @@
 **Spotify without the slop. A focused, minimal Spotify remote for iPhone.**
 
 <p align="center">
-  <img src="docs/screenshots/home.png" width="30%" alt="Home with handpicked playlists">
-  <img src="docs/screenshots/player.png" width="30%" alt="Full player showing Soft Spot by keshi with live lyrics">
-  <img src="docs/screenshots/discover.png" width="30%" alt="Discover: five songs for today">
+  <img src="docs/screenshots/home-iphone.png" width="30%" alt="Home with handpicked playlists">
+  <img src="docs/screenshots/player-live-lyrics.png" width="30%" alt="Full player showing Soft Spot by keshi with live lyrics">
+  <img src="docs/screenshots/discover-iphone.png" width="30%" alt="Discover: five songs for today">
 </p>
 
 Your playlists up front. Search when you want it. No recommendations feed to scroll past.
