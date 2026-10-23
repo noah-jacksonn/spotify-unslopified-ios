@@ -9,6 +9,7 @@ struct LibrarySheet: View {
     @State private var filter: Filter = .mine
     @State private var query = ""
     @State private var deleting: Playlist?
+    @State private var editingCover: Playlist?
     @State private var path = NavigationPath()
 
     enum Filter: String, CaseIterable { case mine = "By you", all = "All", others = "By others" }
@@ -49,6 +50,7 @@ struct LibrarySheet: View {
         .songAlbumNavigation(path: $path)
         .playerBar()
         .deletePlaylistConfirmation($deleting)
+        .playlistCoverEditor($editingCover)
         .presentationBackground(look.palette.background)
     }
 
@@ -88,7 +90,7 @@ struct LibrarySheet: View {
         return HStack(spacing: 10) {
             NavigationLink(value: playlist) {
                 HStack(spacing: 14) {
-                    ArtworkView(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
+                    ArtworkView(artwork: model.artwork(for: playlist))
                         .frame(width: 56, height: 56)
                         .artClip(look, size: 56)
                     VStack(alignment: .leading, spacing: 3) {
@@ -102,9 +104,12 @@ struct LibrarySheet: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                    if playlist.isMine {
-                        Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
-                    }
+                if playlist.isMine {
+                    Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
+                }
+                if playlist.isOwned {
+                    Button("Change cover", systemImage: "photo") { editingCover = playlist }
+                }
                 Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
                     deleting = playlist
                 }

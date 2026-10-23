@@ -7,6 +7,7 @@
 #   scripts/run-on-iphone.sh                 build, install, launch
 #   scripts/run-on-iphone.sh --preview       launch into the sample-music preview
 #   scripts/run-on-iphone.sh --search        open Search
+#   scripts/run-on-iphone.sh --lyrics-search open Search with lyrics enabled
 #   scripts/run-on-iphone.sh --discover      open Discover
 #   scripts/run-on-iphone.sh --discover-home open Home with its Discover entry
 #   scripts/run-on-iphone.sh --queue         open the queue
@@ -36,6 +37,7 @@ while [ $# -gt 0 ]; do
     --console) CONSOLE=1 ;;
     --preview) APP_ARGS+=(-preview) ;;
     --search) APP_ARGS+=(-openSearch) ;;
+    --lyrics-search) APP_ARGS+=(-openLyricsSearch) ;;
     --queue) APP_ARGS+=(-openQueue) ;;
     --daily-five|--discover) APP_ARGS+=(-openDailyFive) ;;
     --discover-home) ;; # Home is the default; keep its normal top alignment.
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
     --album) APP_ARGS+=(-openAlbum) ;;
     --loader) APP_ARGS+=(-preview -slowLoad) ;;
     --cover) APP_ARGS+=(-openPlaylist -openCover) ;;
+    --edit-cover) APP_ARGS+=(-openPlaylist -editPlaylistCover) ;;
     --now-playing) APP_ARGS+=(-openNowPlaying) ;;
     --lyrics) APP_ARGS+=(-openLyrics) ;;
     --live-lyrics) APP_ARGS+=(-liveLyrics) ;;

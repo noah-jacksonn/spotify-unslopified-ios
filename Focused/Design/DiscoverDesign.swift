@@ -60,6 +60,50 @@ struct DiscoverHeading: View {
     }
 }
 
+/// Matches the controls and five editorial rows without exposing yesterday's songs.
+struct DiscoverSkeleton: View {
+    @Environment(\.look) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 12) {
+                Capsule().frame(width: 132, height: 46)
+                Circle().frame(width: 46, height: 46)
+                Circle().frame(width: 46, height: 46)
+            }
+            ForEach(0..<5) { index in
+                VStack(spacing: 18) {
+                    HStack(alignment: .top, spacing: 14) {
+                        RoundedRectangle(cornerRadius: look.artRadius(70))
+                            .frame(width: 70, height: 70)
+                        VStack(alignment: .leading, spacing: 10) {
+                            bar(width: [0.9, 0.7, 0.85, 0.65, 0.8][index], height: 16)
+                            bar(width: 0.55, height: 12)
+                            bar(width: 0.75, height: 10)
+                        }
+                        .padding(.top, 3)
+                        Capsule().frame(width: 20, height: 10)
+                    }
+                    if index < 4 { Rectangle().frame(height: 0.5) }
+                }
+            }
+        }
+        .foregroundStyle(look.palette.muted.opacity(0.3))
+        .compositingGroup()
+        .modifier(DiagonalShimmer())
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading today's five")
+        .accessibilityIdentifier("discover.skeleton")
+    }
+
+    private func bar(width: CGFloat, height: CGFloat) -> some View {
+        Capsule().frame(height: height)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .scaleEffect(x: width, anchor: .leading)
+    }
+}
+
 struct DiscoverTracks: View {
     var edition: DailyEdition
     @Environment(AppModel.self) private var model

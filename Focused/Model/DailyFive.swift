@@ -95,6 +95,13 @@ final class DailyFive {
 
     var isToday: Bool { edition?.day == DailySelection.dayKey(Date()) }
 
+    /// Hide stale picks even before the view's load task starts. Keep the last
+    /// edition available as a fallback only after a refresh fails.
+    func showsLoadingSkeleton(on date: Date = .now) -> Bool {
+        !sourceIDs.isEmpty && edition?.day != DailySelection.dayKey(date)
+            && (isLoading || error == nil)
+    }
+
     func setSources(_ playlists: [Playlist]) {
         var seen = Set<String>()
         saved.sourceIDs = Array(playlists.filter { $0.isMine && seen.insert($0.id).inserted }.prefix(5).map(\.id))

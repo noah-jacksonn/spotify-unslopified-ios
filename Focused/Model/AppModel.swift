@@ -28,6 +28,33 @@ final class AppModel {
     /// Deleted this session; kept out of library loads that started before
     /// Spotify caught up.
     private var deletedIDs: Set<String> = []
+    // Only accepted uploads; avoids showing Spotify's stale CDN image immediately
+    // after saving. Compressed JPEGs are session-scoped, with one per playlist.
+    private var uploadedCovers: [String: (key: String, jpeg: Data)] = [:]
+    private var savingCoverIDs: Set<String> = []
+
+    func artwork(for playlist: Playlist) -> Artwork {
+        if let cover = uploadedCovers[playlist.id] {
+            if !ImageCache.shared.contains(id: cover.key), let image = UIImage(data: cover.jpeg) {
+                ImageCache.shared.store(image, id: cover.key)
+            }
+            return .image(id: cover.key)
+        }
+        let current = playlists.first { $0.id == playlist.id } ?? playlist
+        return Artwork(url: current.imageURL, seed: current.demoSeed)
+    }
+
+    func updateCover(_ jpeg: Data, for playlist: Playlist) async throws {
+        guard playlist.isOwned, let music, !savingCoverIDs.contains(playlist.id) else {
+            throw SpotifyAPI.APIError.http(status: 400, reason: nil, message: "This playlist cover can't be changed right now.")
+        }
+        savingCoverIDs.insert(playlist.id)
+        defer { if self.music === music { savingCoverIDs.remove(playlist.id) } }
+        try await music.updateCover(jpeg, for: playlist)
+        guard self.music === music else { throw CancellationError() }
+        uploadedCovers[playlist.id] = (UUID().uuidString, jpeg)
+        show(mode == .preview ? "Preview cover updated" : "Playlist cover updated")
+    }
 
     init() {
         sleepTimer = SleepTimer(auth: auth)
@@ -48,7 +75,7 @@ final class AppModel {
             // Signed in before a permission was added (2026-10-02: playlist
             // editing). Spotify only grants new scopes at sign-in.
             auth.signOut()
-            signInError = "Sign in again so Spotify Unslopified can edit your playlists and library."
+            signInError = "Sign in again so Spotify Unslopified can edit your playlists, covers and library."
         }
         if auth.isSignedIn { startSpotify() }
     }
@@ -89,6 +116,8 @@ final class AppModel {
         dailyFiveError = nil
         self.music = music
         deletedIDs = []
+        uploadedCovers = [:]
+        savingCoverIDs = []
         home = HomeSelection(scope: scope)
         self.mode = mode
         playlists = []
@@ -132,6 +161,8 @@ final class AppModel {
         music?.appWillResignActive()
         if mode == .spotify { auth.signOut() }
         music = nil
+        uploadedCovers = [:]
+        savingCoverIDs = []
         playlists = []
         libraryState = .idle
         mode = .signedOut

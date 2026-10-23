@@ -46,14 +46,9 @@ private struct DailyFiveContent: View {
                 if daily.sourceIDs.isEmpty {
                     setup
                 } else {
-                    if daily.isLoading {
-                        HStack(spacing: 12) {
-                            BarsLoader(size: 18, delay: .zero)
-                            Text(daily.progress).font(look.font(14)).foregroundStyle(look.palette.muted)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let edition = daily.edition {
+                    if daily.showsLoadingSkeleton() {
+                        DiscoverSkeleton()
+                    } else if let edition = daily.edition {
                         editionView(edition)
                     }
                     if let error = daily.error {
@@ -97,7 +92,7 @@ private struct DailyFiveContent: View {
     }
 
     private var introduction: some View {
-        DiscoverHeading(isToday: daily.edition == nil || daily.isToday)
+        DiscoverHeading(isToday: daily.showsLoadingSkeleton() || daily.edition == nil || daily.isToday)
     }
 
     private var setup: some View {
@@ -182,7 +177,7 @@ private struct DailySourcesSheet: View {
                             else if selected.count < 5 { selected.insert(playlist.id) }
                         } label: {
                             HStack(spacing: 14) {
-                                ArtworkView(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
+                                ArtworkView(artwork: model.artwork(for: playlist))
                                     .frame(width: 54, height: 54).artClip(look, size: 54)
                                 Text(playlist.name).font(look.font(16, .medium)).multilineTextAlignment(.leading)
                                 Spacer()

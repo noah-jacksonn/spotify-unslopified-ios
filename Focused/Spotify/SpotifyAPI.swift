@@ -75,6 +75,16 @@ struct SpotifyAPI {
         try await send("POST", "playlists/\(id)/items", json: ["uris": uris])
     }
 
+    /// Spotify expects the raw base64 string, not JSON or a data URL.
+    func uploadPlaylistCover(_ jpeg: Data, playlistID: String) async throws {
+        let body = jpeg.base64EncodedData()
+        guard !jpeg.isEmpty, body.count <= 256_000 else {
+            throw APIError.http(status: 400, reason: nil, message: "Choose a smaller cover image.")
+        }
+        _ = try await perform("PUT", url("playlists/\(playlistID)/images"),
+                              body: body, contentType: "image/jpeg")
+    }
+
     /// Removes every occurrence of each URI (at most 100 per call).
     func removeItems(_ uris: [String], fromPlaylist id: String) async throws {
         try await send("DELETE", "playlists/\(id)/items", json: ["items": uris.map { ["uri": $0] }])
@@ -92,6 +102,16 @@ struct SpotifyAPI {
             albums: response.albums?.items.compactMap { $0?.model } ?? [],
             playlists: response.playlists?.items.compactMap { $0?.catalogModel } ?? []
         )
+    }
+
+    /// Track-only lookup for resolving a lyric match without fetching other types.
+    func searchTracks(_ query: String) async throws -> [Track] {
+        let response: SearchDTO = try await get("search", [
+            .init(name: "q", value: query),
+            .init(name: "type", value: "track"),
+            .init(name: "limit", value: "10"),
+        ])
+        return response.tracks?.items.compactMap { $0?.model } ?? []
     }
 
     // MARK: Artists and albums
@@ -277,13 +297,13 @@ struct SpotifyAPI {
     }
 
     /// Retries once after refreshing on 401, and once after Retry-After on 429.
-    private func perform(_ method: String, _ url: URL, body: Data? = nil, attempt: Int = 0) async throws -> (Data, HTTPURLResponse) {
+    private func perform(_ method: String, _ url: URL, body: Data? = nil, contentType: String = "application/json", attempt: Int = 0) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(try await auth.accessToken())", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         } else if method != "GET" {
             request.httpBody = Data()
         }
@@ -293,12 +313,12 @@ struct SpotifyAPI {
 
         if attempt == 0, http.statusCode == 401 {
             try await auth.refresh()
-            return try await perform(method, url, body: body, attempt: 1)
+            return try await perform(method, url, body: body, contentType: contentType, attempt: 1)
         }
         if attempt == 0, http.statusCode == 429,
            let wait = http.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init), wait <= 5 {
             try await Task.sleep(for: .seconds(wait))
-            return try await perform(method, url, body: body, attempt: 1)
+            return try await perform(method, url, body: body, contentType: contentType, attempt: 1)
         }
         struct ErrorBody: Decodable {
             struct Inner: Decodable { var message: String?; var reason: String? }

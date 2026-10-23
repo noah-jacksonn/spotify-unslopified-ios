@@ -27,6 +27,7 @@ final class SpotifyMusic: MusicService {
 
     private let auth: SpotifyAuth
     private let api: SpotifyAPI
+    private let lyricsSearch = LyricsSearchService()
     private let remote: SPTAppRemote
     private let remoteDelegate = RemoteDelegate()
     private var isActive = true
@@ -112,6 +113,10 @@ final class SpotifyMusic: MusicService {
     func tracks(in playlist: Playlist) async throws -> [Track] { try await api.tracks(inPlaylist: playlist.id) }
     func search(_ query: String) async throws -> SearchResults { try await api.search(query) }
 
+    func searchLyrics(_ query: String, page: Int) async throws -> LyricsSearchPage {
+        try await lyricsSearch.search(query, page: page) { try await self.api.searchTracks($0) }
+    }
+
     /// Only the artist lookup is required; a section that fails comes back
     /// empty so the rest of the page still shows.
     func artistPage(_ artist: CatalogItem) async throws -> ArtistPage {
@@ -126,6 +131,10 @@ final class SpotifyMusic: MusicService {
     func add(_ trackURIs: [String], to playlist: Playlist) async throws {
         try await api.addItems(trackURIs, toPlaylist: playlist.id)
     }
+    func updateCover(_ jpeg: Data, for playlist: Playlist) async throws {
+        try await api.uploadPlaylistCover(jpeg, playlistID: playlist.id)
+    }
+
     func deletePlaylist(_ playlist: Playlist) async throws {
         try await api.removeFromLibrary([playlist.uri])
     }

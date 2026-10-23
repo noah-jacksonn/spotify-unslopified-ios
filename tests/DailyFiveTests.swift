@@ -15,8 +15,10 @@ struct DailyFiveTests {
         let music = DemoMusic()
         let playlists = try await music.loadPlaylists()
         let daily = DailyFive(accountID: "one", defaults: defaults)
+        precondition(!daily.showsLoadingSkeleton(), "Show setup before sources are chosen")
         daily.setSources(Array(playlists.filter(\.isMine).prefix(3)))
         let today = Date()
+        precondition(daily.showsLoadingSkeleton(on: today), "Show skeletons before the first load starts")
         await daily.load(using: music, playlists: playlists, clock: { today })
         guard let edition = daily.edition else { fatalError(daily.error ?? "No edition") }
         precondition(edition.picks.count == 5)
@@ -32,6 +34,7 @@ struct DailyFiveTests {
         await daily.load(using: music, playlists: playlists, clock: { today })
         precondition(daily.edition?.picks.map(\.id) == ids, "Reload must preserve today's five")
         let restored = DailyFive(accountID: "one", defaults: defaults)
+        precondition(!restored.showsLoadingSkeleton(on: today), "Today's cached edition displays immediately")
         precondition(restored.edition?.picks.map(\.id) == ids, "Persist across launches")
         precondition(restored.sourceIDs == daily.sourceIDs)
         let freshDemo = DemoMusic()
@@ -43,9 +46,18 @@ struct DailyFiveTests {
         daily.setSources([playlists[0]])
         precondition(daily.edition?.picks.map(\.id) == ids, "Changing sources must preserve today's edition")
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+        precondition(restored.showsLoadingSkeleton(on: tomorrow), "Yesterday's cache must not flash before refreshing")
         await restored.load(using: music, playlists: [], clock: { tomorrow })
         precondition(restored.edition?.picks.map(\.id) == ids && restored.error != nil,
                      "Failed refresh must preserve the last playable edition")
+        precondition(!restored.showsLoadingSkeleton(on: tomorrow), "Failed refresh reveals the saved edition")
+        let retry = Task { await restored.load(using: music, playlists: playlists, clock: { tomorrow }) }
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(restored.isLoading && restored.showsLoadingSkeleton(on: tomorrow),
+                     "Retry hides yesterday's picks while fetching today's edition")
+        await retry.value
+        precondition(restored.edition?.day == DailySelection.dayKey(tomorrow)
+                     && !restored.showsLoadingSkeleton(on: tomorrow), "New edition replaces skeletons")
         await daily.load(using: music, playlists: playlists, clock: { tomorrow })
         guard let next = daily.edition else { fatalError("Missing next edition") }
         precondition(next.day != edition.day && next.picks.count == 5)
@@ -134,6 +146,7 @@ private final class FailingCollaboratorMusic: MusicService {
         return tracks
     }
     func search(_ query: String) async throws -> SearchResults { try await demo.search(query) }
+    func searchLyrics(_ query: String, page: Int) async throws -> LyricsSearchPage { try await demo.searchLyrics(query, page: page) }
     func artistPage(_ artist: CatalogItem) async throws -> ArtistPage { try await demo.artistPage(artist) }
     func albumPage(_ album: CatalogItem) async throws -> AlbumPage { try await demo.albumPage(album) }
     func add(_ trackURIs: [String], to playlist: Playlist) async throws {}

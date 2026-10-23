@@ -84,11 +84,46 @@ final class DemoMusic: MusicService {
         return SearchResults(tracks: Array(unique.prefix(10)), artists: Array(artists), playlists: lists)
     }
 
+    func searchLyrics(_ query: String, page: Int) async throws -> LyricsSearchPage {
+        try await Task.sleep(for: .milliseconds(150))
+        let words = Self.sampleLyricLRC.replacingOccurrences(of: #"\[[^\]]+\]"#, with: "", options: .regularExpression)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let phrase = query.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !phrase.isEmpty, words.localizedStandardContains(phrase), page > 0 else { return LyricsSearchPage() }
+        // All preview songs use these same original words in the player.
+        var seen = Set<String>()
+        let excerpt = Self.sampleLyricLRC.components(separatedBy: .newlines)
+            .map { $0.replacingOccurrences(of: #"\[[^\]]+\]"#, with: "", options: .regularExpression) }
+            .first { $0.localizedStandardContains(phrase) } ?? words
+        let tracks = tracksByPlaylist.values.joined().sorted { $0.id < $1.id }
+            .filter { seen.insert($0.name).inserted }
+        guard page <= (tracks.count + 4) / 5 else { return LyricsSearchPage() }
+        let matches = tracks.dropFirst((page - 1) * 5).prefix(5)
+            .map { LyricsSearchMatch(track: $0, excerpt: excerpt) }
+        return LyricsSearchPage(matches: matches, nextPage: page * 5 < tracks.count ? page + 1 : nil)
+    }
+
+    static let sampleLyricLRC = """
+    [00:00.00]Morning light across the floor
+    [00:05.00]An open window, an open door
+    [00:10.00]Leave the hurry far behind
+    [00:15.00]Take a little time
+    [00:20.00]
+    [00:25.00]Every road can bend again
+    [00:30.00]Every sky can clear
+    [00:35.00]There is room to wander
+    [00:40.00]There is music here
+    """
+
     func add(_ trackURIs: [String], to playlist: Playlist) async throws {
         try await Task.sleep(for: .milliseconds(200))
         let all = Array(tracksByPlaylist.values.joined())
         let added = trackURIs.compactMap { uri in all.first { $0.uri == uri } }
         tracksByPlaylist[playlist.id, default: []] += added
+    }
+
+    func updateCover(_ jpeg: Data, for playlist: Playlist) async throws {
+        try await Task.sleep(for: .milliseconds(200))
     }
 
     func deletePlaylist(_ playlist: Playlist) async throws {

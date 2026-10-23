@@ -49,9 +49,12 @@ protocol MusicService: AnyObject {
     func loadPlaylists() async throws -> [Playlist]
     func tracks(in playlist: Playlist) async throws -> [Track]
     func search(_ query: String) async throws -> SearchResults
+    func searchLyrics(_ query: String, page: Int) async throws -> LyricsSearchPage
     func artistPage(_ artist: CatalogItem) async throws -> ArtistPage
     func albumPage(_ album: CatalogItem) async throws -> AlbumPage
     func add(_ trackURIs: [String], to playlist: Playlist) async throws
+    /// Replaces an owned playlist's cover with a prepared JPEG.
+    func updateCover(_ jpeg: Data, for playlist: Playlist) async throws
     /// Removes the playlist from the library (deletes it, if it's yours).
     func deletePlaylist(_ playlist: Playlist) async throws
     /// Removes every copy of each song.
@@ -82,6 +85,9 @@ protocol MusicService: AnyObject {
 }
 
 extension MusicService {
+    func updateCover(_ jpeg: Data, for playlist: Playlist) async throws {
+        throw URLError(.unsupportedURL)
+    }
     func prepareForPlayback(_ tracks: [Track]) {}
     /// No speed control unless a service provides one (the preview doesn't).
     var podcastSpeeds: [Double] { [] }

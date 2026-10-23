@@ -29,6 +29,16 @@ struct QueueTests {
         try await empty.enqueue(added)
         let inactive = try await empty.playbackQueue()
         precondition(inactive.current == nil && inactive.upcoming == [added], "Adding while inactive must not start playback")
-        print("Queue checks passed: order, duplicates, context, next, inactive playback")
+
+        // Queued songs use the same direct play request as search results.
+        // Do not turn Spotify's partial queue snapshot into a new track list.
+        let selectedTrack = queued.upcoming[1]
+        music.play(.tracks([selectedTrack.uri]))
+        let selected = try await music.playbackQueue()
+        precondition(selected.current?.uri == added.uri, "The selected queue song must start playing")
+        precondition(music.nowPlaying?.isPaused == false)
+        empty.play(.tracks([inactive.upcoming[0].uri]))
+        precondition(empty.nowPlaying?.trackURI == added.uri && empty.nowPlaying?.isPaused == false, "A queued song must be playable without existing playback")
+        print("Queue checks passed: order, duplicates, context, next, inactive playback, selected-song playback")
     }
 }

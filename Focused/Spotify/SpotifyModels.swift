@@ -39,6 +39,24 @@ struct Track: Identifiable, Hashable, Codable {
     var isPlayable: Bool? = nil
 }
 
+struct LyricsSearchMatch: Identifiable {
+    var track: Track
+    var excerpt: String
+    var id: String { track.uri }
+}
+
+struct LyricsSearchPage {
+    var matches: [LyricsSearchMatch] = []
+    var nextPage: Int? = nil
+
+    /// Keep the existing order and omit tracks repeated by later lyric pages.
+    mutating func append(_ page: LyricsSearchPage) {
+        var seen = Set(matches.map(\.id))
+        matches += page.matches.filter { seen.insert($0.id).inserted }
+        nextPage = page.nextPage
+    }
+}
+
 /// A search hit that isn't a track: an album, artist, or playlist.
 struct CatalogItem: Identifiable, Hashable, Codable {
     enum Kind: String, Codable { case album, artist, playlist }

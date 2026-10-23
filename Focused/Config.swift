@@ -13,6 +13,7 @@ enum Config {
     /// `app-remote-control` lets the same token drive the Spotify app through
     /// the iOS SDK; the rest cover the Web API reads and player controls.
     static let scopes = [
+        "ugc-image-upload",
         "playlist-read-private",
         "playlist-read-collaborative",
         "user-library-read",
@@ -30,6 +31,7 @@ enum Config {
     /// Scopes added after the first sign-ins; a saved sign-in without them
     /// is asked to sign in again (`SpotifyAuth.hasAllScopes`).
     static let laterScopes: Set<String> = [
+        "ugc-image-upload", // 2026-10-20: playlist covers
         "playlist-modify-private", "playlist-modify-public", // 2026-10-02: adding/removing songs
         "user-library-modify", "user-follow-modify",          // 2026-10-03: deleting playlists
     ]

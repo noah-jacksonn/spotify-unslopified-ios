@@ -4,6 +4,7 @@ struct PlaylistView: View {
     var playlist: Playlist
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
+    @State private var editingCover: Playlist?
     @State private var entries: [Entry] = []
     @State private var state: LoadState = .loading
 
@@ -46,7 +47,13 @@ struct PlaylistView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .pageBackground()
+            .playlistCoverEditor($editingCover)
             .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-editPlaylistCover"), playlist.isOwned {
+                    editingCover = playlist
+                }
+                #endif
                 await load()
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-playlistBottom"), let last = entries.last {
@@ -66,7 +73,12 @@ struct PlaylistView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HeaderCover(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
+            HeaderCover(artwork: model.artwork(for: playlist))
+                .contextMenu {
+                    if playlist.isOwned {
+                        Button("Change cover", systemImage: "photo") { editingCover = playlist }
+                    }
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center, spacing: 10) {

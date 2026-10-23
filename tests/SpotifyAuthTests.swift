@@ -3,6 +3,8 @@ import Foundation
 @main
 struct SpotifyAuthTests {
     static func main() throws {
+        precondition(Config.scopes.contains("ugc-image-upload"))
+        precondition(Config.laterScopes.contains("ugc-image-upload"), "Existing sessions must request cover-upload permission")
         let data = Data(#"{"access_token":"new-access","expires_in":3600}"#.utf8)
         let refreshed = try SpotifyAuth.decodeTokens(data, status: 200, keepingRefreshToken: "previous-refresh",
                                                       scope: "playlist-read-private", accountID: "account-one")

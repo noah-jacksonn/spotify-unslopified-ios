@@ -4,31 +4,139 @@ import SwiftUI
 /// search mode. Empty until you type: no recents, no browse categories.
 struct SearchResultsView: View {
     var query: String
+    var searchesLyrics: Bool
     @Binding var isLoading: Bool
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
     @State private var results = SearchResults()
-    /// The text `results` answers. While typing, the old results stay up and
-    /// "Nothing found" waits until a search for the current text comes back
-    /// empty, so it never flashes mid-word.
+    @State private var lyricResults = LyricsSearchPage()
+    @State private var isLoadingMore = false
+    @State private var loadMoreError: String?
+    @State private var loadMoreTask: Task<Void, Never>?
+    @State private var searchGeneration = 0
+    @State private var resultsAreLyrics = false
+    @State private var searchError: String?
+    @State private var retry = 0
+    /// The text `results` answers. Skeletons replace old results while typing;
+    /// "Nothing found" waits for the current search, so it never flashes mid-word.
     @State private var resultsQuery = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: look.gap * 1.6) {
-            if !results.tracks.isEmpty { songs }
-            if !results.artists.isEmpty { ReleaseShelf(title: "Artists", releases: results.artists, size: 128, circle: true) }
-            if !results.albums.isEmpty { ReleaseShelf(title: "Albums", releases: results.albums, size: 128) }
-            if !results.playlists.isEmpty { playlists }
-            if results.isEmpty && !trimmed.isEmpty && resultsQuery == trimmed {
-                Text("Nothing found for “\(query)”")
-                    .font(look.font(15))
-                    .foregroundStyle(look.palette.muted)
-                    .padding(.horizontal, look.margin)
+            if !trimmed.isEmpty && isLoading {
+                SearchResultsSkeleton(showsLyrics: searchesLyrics)
+            } else if !trimmed.isEmpty && resultsAreLyrics == searchesLyrics {
+                if searchesLyrics {
+                    if !lyricMatches.isEmpty { lyricSongs }
+                } else {
+                    if !results.tracks.isEmpty { songs }
+                    if !results.artists.isEmpty { ReleaseShelf(title: "Artists", releases: results.artists, size: 128, circle: true) }
+                    if !results.albums.isEmpty { ReleaseShelf(title: "Albums", releases: results.albums, size: 128) }
+                    if !results.playlists.isEmpty { playlists }
+                }
+                if resultsQuery == trimmed {
+                    if let searchError {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(searchError).foregroundStyle(look.palette.muted)
+                            Button("Try again") { retry += 1 }
+                                .foregroundStyle(look.palette.accent)
+                        }
+                        .font(look.font(15))
+                        .padding(.horizontal, look.margin)
+                    } else if !isLoadingMore && results.isEmpty && lyricMatches.isEmpty {
+                        Text(emptyMessage)
+                            .font(look.font(15))
+                            .foregroundStyle(look.palette.muted)
+                            .padding(.horizontal, look.margin)
+                    }
+                    if searchesLyrics && searchError == nil { lyricsPagination }
+                }
             }
         }
         .padding(.top, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: query) { await search() }
+        .task(id: Request(query: trimmed, lyrics: searchesLyrics, retry: retry)) { await search() }
+        .onDisappear { cancelLoadingMore() }
+    }
+
+    private var lyricMatches: [LyricsSearchMatch] { lyricResults.matches }
+
+    private var emptyMessage: String {
+        guard searchesLyrics else { return "Nothing found for “\(query)”" }
+        return lyricResults.nextPage == nil
+            ? "No songs found for those lyrics. Try a few different words."
+            : "No matching songs yet. Try loading more."
+    }
+
+    @ViewBuilder private var lyricsPagination: some View {
+        if isLoadingMore {
+            SearchResultsSkeleton(showsLyrics: true, rowCount: 2, showsHeading: false)
+        } else if lyricResults.nextPage != nil {
+            VStack(alignment: .leading, spacing: 12) {
+                if let loadMoreError {
+                    Text(loadMoreError)
+                        .font(look.font(14))
+                        .foregroundStyle(look.palette.muted)
+                }
+                Button(action: loadMore) {
+                    Text(loadMoreError == nil ? "Load more" : "Try again")
+                        .font(look.font(15, .medium))
+                        .foregroundStyle(look.palette.text)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(look.palette.raised, in: Capsule())
+                }
+                .buttonStyle(PressScale())
+                .accessibilityIdentifier("search.loadMore")
+            }
+            .padding(.horizontal, look.margin)
+        }
+    }
+
+    private struct Request: Equatable {
+        var query: String
+        var lyrics: Bool
+        var retry: Int
+    }
+
+    private var lyricSongs: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionTitle(text: "Lyrics matches")
+            ForEach(lyricMatches) { match in
+                VStack(alignment: .leading, spacing: 2) {
+                    TrackRow(track: match.track, showsAddMenu: true) {
+                        model.music?.play(.tracks([match.track.uri]))
+                    }
+                    Button {
+                        model.music?.play(.tracks([match.track.uri]))
+                    } label: {
+                        highlighted(match.excerpt)
+                            .font(look.font(13))
+                            .foregroundStyle(look.palette.muted)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 58)
+                    .padding(.trailing, 44)
+                    .accessibilityLabel("Play \(match.track.name). Lyrics: \(match.excerpt)")
+                }
+            }
+        }
+        .padding(.horizontal, look.margin)
+    }
+
+    /// Same treatment as Harmony's transcript search: muted surrounding words,
+    /// with the matched phrase bolded in the full-strength foreground.
+    private func highlighted(_ excerpt: String) -> Text {
+        guard let range = excerpt.range(of: resultsQuery, options: [.caseInsensitive, .diacriticInsensitive]) else {
+            return Text(excerpt)
+        }
+        let before = Text(String(excerpt[..<range.lowerBound]))
+        let match = Text(String(excerpt[range])).font(look.font(13, .semibold)).foregroundStyle(look.palette.text)
+        let after = Text(String(excerpt[range.upperBound...]))
+        return Text("\(before)\(match)\(after)")
     }
 
     private var songs: some View {
@@ -72,29 +180,86 @@ struct SearchResultsView: View {
         .padding(.horizontal, look.margin)
     }
 
-    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+    private var trimmed: String { query.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+
+    private func cancelLoadingMore() {
+        searchGeneration += 1
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        isLoadingMore = false
+        loadMoreError = nil
+    }
+
+    private func loadMore() {
+        guard !isLoading, !isLoadingMore, searchesLyrics, resultsQuery == trimmed,
+              let page = lyricResults.nextPage, let music = model.music else { return }
+        let generation = searchGeneration
+        let text = resultsQuery
+        isLoadingMore = true
+        loadMoreError = nil
+        loadMoreTask = Task {
+            defer {
+                if searchGeneration == generation {
+                    isLoadingMore = false
+                    loadMoreTask = nil
+                }
+            }
+            do {
+                let found = try await music.searchLyrics(text, page: page)
+                guard !Task.isCancelled, searchGeneration == generation else { return }
+                withAnimation(look.animation) { lyricResults.append(found) }
+            } catch {
+                guard !Task.isCancelled, searchGeneration == generation else { return }
+                // Keep both the visible songs and the failed page's retry cursor.
+                loadMoreError = error.localizedDescription
+            }
+        }
+    }
 
     private func search() async {
+        guard !Task.isCancelled else { return }
+        cancelLoadingMore()
         let text = trimmed
+        searchError = nil
         guard !text.isEmpty, let music = model.music else {
             results = SearchResults()
+            lyricResults = LyricsSearchPage()
             resultsQuery = ""
             isLoading = false
             return
         }
-        try? await Task.sleep(for: .milliseconds(320))
-        guard !Task.isCancelled else { return }
+        if resultsAreLyrics != searchesLyrics {
+            results = SearchResults()
+            lyricResults = LyricsSearchPage()
+            resultsQuery = ""
+        }
         isLoading = true
         defer { if !Task.isCancelled { isLoading = false } }
         do {
-            let found = try await music.search(text)
+            try await Task.sleep(for: .milliseconds(searchesLyrics ? 500 : 320))
+            let found: SearchResults
+            let lyrics: LyricsSearchPage
+            if searchesLyrics {
+                lyrics = try await music.searchLyrics(text, page: 1)
+                found = SearchResults()
+            } else {
+                found = try await music.search(text)
+                lyrics = LyricsSearchPage()
+            }
             guard !Task.isCancelled else { return }
             withAnimation(look.animation) {
                 results = found
+                lyricResults = lyrics
                 resultsQuery = text
+                resultsAreLyrics = searchesLyrics
             }
         } catch {
-            if !Task.isCancelled { model.show(error.localizedDescription) }
+            guard !Task.isCancelled else { return }
+            results = SearchResults()
+            lyricResults = LyricsSearchPage()
+            resultsQuery = text
+            resultsAreLyrics = searchesLyrics
+            searchError = error.localizedDescription
         }
     }
 }
@@ -104,6 +269,7 @@ struct SearchResultsView: View {
 /// the button stretches into the field.
 struct SearchField: View {
     @Binding var query: String
+    @Binding var searchesLyrics: Bool
     var isLoading: Bool
     var focused: FocusState<Bool>.Binding
     var namespace: Namespace.ID
@@ -111,23 +277,44 @@ struct SearchField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(look.palette.muted)
-                .matchedGeometryEffect(id: "search.icon", in: namespace)
-            TextField("Songs, artists, albums", text: $query)
+            ZStack {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(look.palette.muted)
+                    .matchedGeometryEffect(id: "search.icon", in: namespace)
+                    .opacity(isLoading ? 0 : 1)
+                if isLoading { BarsLoader(size: 14, delay: .zero) }
+            }
+            .frame(width: 18)
+            TextField(searchesLyrics ? "Words from a song" : "Songs, artists, albums", text: $query)
                 .font(look.font(17))
                 .foregroundStyle(look.palette.text)
                 .focused(focused)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
-            if isLoading {
-                BarsLoader(size: 14, delay: .zero)
-            } else if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(look.palette.muted)
+            HStack(spacing: 0) {
+                Button { searchesLyrics.toggle() } label: {
+                    Image(systemName: "text.quote")
+                        .font(look.font(17, .medium))
+                        .foregroundStyle(searchesLyrics ? look.palette.accent : look.palette.muted)
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .accessibilityLabel("Clear")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search by lyrics")
+                .accessibilityValue(searchesLyrics ? "On" : "Off")
+                .accessibilityAddTraits(searchesLyrics ? .isSelected : [])
+                .accessibilityIdentifier("search.lyrics")
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(look.palette.muted)
+                            .frame(width: 28, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+                }
             }
         }
         .padding(.horizontal, 16)

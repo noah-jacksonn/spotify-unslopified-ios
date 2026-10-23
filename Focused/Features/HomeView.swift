@@ -10,10 +10,12 @@ struct HomeView: View {
     @Environment(\.look) private var look
     @State private var isSearching = false
     @State private var query = ""
+    @State private var searchesLyrics = false
     @State private var isLoadingResults = false
     @State private var barsTaps = 0
     @State private var barsPressed = false
     @State private var showsSleepTimer = false
+    @AppStorage("home.hidesDiscover") private var hidesDiscover = false
     @FocusState private var searchFocused: Bool
     @Namespace private var morph
 
@@ -22,14 +24,14 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: look.gap * 1.6) {
                 header
                 if isSearching {
-                    SearchResultsView(query: query, isLoading: $isLoadingResults)
+                    SearchResultsView(query: query, searchesLyrics: searchesLyrics, isLoading: $isLoadingResults)
                         .transition(.opacity.combined(with: .offset(y: 16)))
                 } else {
                     Group {
                         content
                         VStack(spacing: 12) {
                             if !model.homePlaylists.isEmpty { allPlaylistsButton }
-                            dailyFiveButton
+                            if !hidesDiscover { dailyFiveButton }
                         }
                     }
                     .transition(.opacity.combined(with: .offset(y: 24)))
@@ -43,6 +45,7 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .pageBackground()
         .animation(look.animation, value: model.home.ids)
+        .animation(look.animation, value: hidesDiscover)
         .sheet(isPresented: $showsSleepTimer) {
             SleepTimerSheet().environment(\.look, look)
         }
@@ -50,6 +53,10 @@ struct HomeView: View {
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("-openSearch"), !isSearching { setSearching(true) }
+            if arguments.contains("-openLyricsSearch"), !isSearching {
+                searchesLyrics = true
+                setSearching(true)
+            }
             if arguments.contains("-openSleepTimer") { showsSleepTimer = true }
             #endif
         }
@@ -69,7 +76,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
                 if isSearching {
-                    SearchField(query: $query, isLoading: isLoadingResults, focused: $searchFocused, namespace: morph)
+                    SearchField(query: $query, searchesLyrics: $searchesLyrics, isLoading: isLoadingResults, focused: $searchFocused, namespace: morph)
                     Button("Cancel") { setSearching(false) }
                         .font(look.font(16, .medium))
                         .foregroundStyle(look.palette.text)
@@ -186,6 +193,9 @@ struct HomeView: View {
     private var accountMenu: some View {
         Menu {
             Button("Sleep timer", systemImage: "moon.zzz") { showsSleepTimer = true }
+            if hidesDiscover {
+                Button("Show Discover", systemImage: "eye") { hidesDiscover = false }
+            }
             if model.mode == .preview {
                 Label("Previewing sample music", systemImage: "sparkles")
                 Button("Leave preview", systemImage: "arrow.uturn.left") { model.signOut() }
@@ -226,6 +236,9 @@ struct HomeView: View {
             DiscoverEntry(artworks: discoverArtworks)
         }
         .buttonStyle(PressScale())
+        .contextMenu {
+            Button("Hide Discover", systemImage: "eye.slash") { hidesDiscover = true }
+        }
         .padding(.horizontal, look.margin)
     }
 
@@ -280,6 +293,7 @@ private struct PlaylistList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
     @State private var deleting: Playlist?
+    @State private var editingCover: Playlist?
 
     var body: some View {
         VStack(spacing: look.gap) {
@@ -295,6 +309,9 @@ private struct PlaylistList: View {
                     Button("Play", systemImage: "play.fill") { model.music?.play(.context(uri: playlist.uri)) }
                     Button("Move to top", systemImage: "arrow.up.to.line") { model.home.moveToTop(playlist) }
                     Button("Remove from Home", systemImage: "minus.circle") { model.home.remove(playlist) }
+                    if playlist.isOwned {
+                        Button("Change cover", systemImage: "photo") { editingCover = playlist }
+                    }
                     Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
                         deleting = playlist
                     }
@@ -308,6 +325,7 @@ private struct PlaylistList: View {
             }
         }
         .deletePlaylistConfirmation($deleting)
+        .playlistCoverEditor($editingCover)
         .padding(.horizontal, look.margin)
     }
 
@@ -324,7 +342,7 @@ private struct PlaylistList: View {
         let detail = [playlist.trackCount.map { "\($0) songs" }, playlist.isMine ? nil : playlist.ownerName]
             .compactMap { $0 }.joined(separator: " · ")
         return HStack(spacing: 16) {
-            ArtworkView(artwork: Artwork(url: playlist.imageURL, seed: playlist.demoSeed))
+            ArtworkView(artwork: model.artwork(for: playlist))
                 .frame(width: 88, height: 88)
                 .artClip(look, size: 88)
             VStack(alignment: .leading, spacing: 3) {

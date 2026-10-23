@@ -19,23 +19,18 @@ struct QueueSheet: View {
                     if let current = queue?.current {
                         VStack(alignment: .leading, spacing: 8) {
                             SectionTitle(text: "Now playing")
-                            queueRow(current)
+                            queueRow(current, isCurrent: true)
                         }
                     }
-                    if let queue {
+                    if let queue, !queue.upcoming.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             SectionTitle(text: "Next up")
-                            if queue.upcoming.isEmpty {
-                                Text("Your queue is empty. Add songs from search, an album, or a playlist.")
-                                    .font(look.font(16)).foregroundStyle(look.palette.muted)
-                            } else {
-                                // A song may appear more than once; identify occurrences.
-                                ForEach(Array(queue.upcoming.enumerated()), id: \.offset) { _, track in
-                                    queueRow(track)
-                                }
+                            // A song may appear more than once; identify occurrences.
+                            ForEach(Array(queue.upcoming.enumerated()), id: \.offset) { _, track in
+                                queueRow(track)
                             }
                         }
-                    } else if loading {
+                    } else if queue == nil && loading {
                         BarsLoader().frame(maxWidth: .infinity, minHeight: 160)
                     }
                     if let error {
@@ -45,11 +40,12 @@ struct QueueSheet: View {
                     if model.pendingQueueRequests > 0 {
                         HStack { BarsLoader(size: 16, delay: .zero); Text("Adding to queue…").font(look.font(14)) }
                     }
-                    Text("Upcoming tracks are supplied by Spotify. To reorder or remove songs, open the queue in Spotify.")
+                    Text("To reorder or remove songs, open the queue in Spotify.")
                         .font(look.font(12)).foregroundStyle(look.palette.muted)
                 }
                 .padding(look.margin)
             }
+            .defaultScrollAnchor(centersEmptyMessage ? .center : .top, for: .alignment)
             .refreshable { await refresh() }
             .pageBackground()
             .navigationTitle("Queue")
@@ -76,22 +72,47 @@ struct QueueSheet: View {
         }
     }
 
-    private func queueRow(_ track: Track) -> some View {
+    private var centersEmptyMessage: Bool {
+        queue?.current == nil && queue?.upcoming.isEmpty == true
+            && error == nil && model.pendingQueueRequests == 0
+    }
+
+    private func queueRow(_ track: Track, isCurrent: Bool = false) -> some View {
         HStack(spacing: 12) {
-            ArtworkView(artwork: Artwork(url: track.imageURL, seed: track.demoSeed))
-                .frame(width: 48, height: 48).artClip(look, size: 48)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.name).font(look.font(16, .medium)).foregroundStyle(look.palette.text).lineLimit(2)
-                Text(track.artists).font(look.font(13)).foregroundStyle(look.palette.muted).lineLimit(1)
+            Button {
+                play(track, isCurrent: isCurrent)
+            } label: {
+                HStack(spacing: 12) {
+                    ArtworkView(artwork: Artwork(url: track.imageURL, seed: track.demoSeed))
+                        .frame(width: 48, height: 48).artClip(look, size: 48)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(track.name).font(look.font(16, .medium)).foregroundStyle(look.palette.text).lineLimit(2)
+                        Text(track.artists).font(look.font(13)).foregroundStyle(look.palette.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 4)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play \(track.name) by \(track.artists)")
             AddToPlaylistMenu(track: track)
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
-        .songContextMenu(track)
+        .songContextMenu(track, play: { play(track, isCurrent: isCurrent) })
         // In a queue, swiping implies removing this occurrence. Spotify
         // doesn't expose removal, so don't reuse the browse-row add gesture.
+    }
+
+    private func play(_ track: Track, isCurrent: Bool) {
+        guard let music = model.music else { return }
+        if isCurrent, let current = music.nowPlaying, current.trackURI == track.uri {
+            if current.isPaused { music.togglePause() }
+            return
+        }
+        // Play this song just like a search result. Spotify's queue response
+        // is only a snapshot, so never rebuild playback from its remaining rows.
+        music.play(.tracks([track.uri]))
     }
 
     private func refresh() async {
