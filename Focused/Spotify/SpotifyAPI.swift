@@ -227,7 +227,10 @@ struct SpotifyAPI {
         try await send("POST", "me/player/queue", [.init(name: "uri", value: uri)])
     }
 
-    func resume() async throws { try await send("PUT", "me/player/play") }
+    func resume(deviceID: String? = nil) async throws {
+        let query = deviceID.map { [URLQueryItem(name: "device_id", value: $0)] } ?? []
+        try await send("PUT", "me/player/play", query)
+    }
     func pause() async throws { try await send("PUT", "me/player/pause") }
     func setShuffle(_ on: Bool) async throws {
         try await send("PUT", "me/player/shuffle", [.init(name: "state", value: on ? "true" : "false")])

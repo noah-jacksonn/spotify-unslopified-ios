@@ -16,10 +16,9 @@ private func log(_ message: String) { print("[playback] \(message)") }
 /// 2. Web API on the active device, or on this phone if Spotify knows it.
 /// 3. Reconnect App Remote quietly: works whenever Spotify is still running
 ///    in the background, even if the Web API no longer lists the phone.
-/// 4. Only then wake the Spotify app with the URI (`authorizeAndPlayURI`).
-///    It briefly opens Spotify, starts the music and returns here. iOS
-///    freezes Spotify a while after it pauses, and only bringing it to the
-///    front unfreezes it, so this step can't be removed entirely.
+/// 4. Open Spotify's Library, then start the requested music through the
+///    Web API with a short background task. This avoids the SDK's Home
+///    screen handoff, but leaves Spotify foregrounded until the user returns.
 @Observable
 final class SpotifyMusic: MusicService {
     private(set) var nowPlaying: NowPlaying?
@@ -32,11 +31,9 @@ final class SpotifyMusic: MusicService {
     private let remoteDelegate = RemoteDelegate()
     private var isActive = true
     private var pollTask: Task<Void, Never>?
-    /// A song to jump to once the woken Spotify app connects, and when it
-    /// was asked for: `authorizeAndPlayURI` can only start a context from
-    /// its top. Ignored after a minute, so an abandoned wake can't start an
-    /// old song later.
-    private var pendingStart: (request: PlayRequest, at: Date, id: Int)?
+    private var libraryWakeTask: Task<Void, Never>?
+    private var libraryWakeBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var libraryWakeFailure: String?
     private var lastImageID: String?
     /// The token the Spotify app hands back after a wake. App Remote
     /// accepts it reliably, so reconnects reuse it until it nears its one-
@@ -49,7 +46,12 @@ final class SpotifyMusic: MusicService {
     /// Bumped by every play and every pause/skip/seek; a slower route still
     /// finishing an older play checks it before jumping or waking, so the
     /// user's latest action always wins.
-    private var playID = 0
+    private var playID = 0 {
+        didSet {
+            cancelLibraryWake()
+            libraryWakeFailure = nil
+        }
+    }
     /// Whether this app turned Spotify's shuffle on. The app has no shuffle
     /// toggle, so the next ordinary play turns it back off.
     private var turnedShuffleOn = false
@@ -170,16 +172,23 @@ final class SpotifyMusic: MusicService {
     }
 
     private func play(_ request: PlayRequest, shuffled: Bool) {
-        pendingStart = nil
         playID += 1
         if shuffled || turnedShuffleOn {
             turnedShuffleOn = shuffled
             setShuffle(shuffled, for: playID)
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-forceLibraryWake") {
+            wakeSpotify(for: request)
+            return
+        }
+        #endif
         if let player, let uri = request.singleURI {
+            let id = playID
             log("play via App Remote")
             player.play(uri) { [weak self] _, error in
-                if error != nil { self?.playWithFallbacks(request) }
+                guard let self, id == self.playID else { return }
+                if error != nil { self.playWithFallbacks(request) }
             }
             return
         }
@@ -221,7 +230,7 @@ final class SpotifyMusic: MusicService {
                 return
             }
             guard id == playID else { return }
-            if let phone = await thisPhoneID(), id == playID, (try? await sendPlay(request, deviceID: phone)) != nil {
+            if let phone = try? await thisPhoneID(), id == playID, (try? await sendPlay(request, deviceID: phone)) != nil {
                 log("play via Web API on this phone")
                 refreshSoon()
             } else if await reconnectRemote(), id == playID, let player {
@@ -241,7 +250,7 @@ final class SpotifyMusic: MusicService {
         }
     }
 
-    /// App Remote and the wake can only start one URI. They start the
+    /// App Remote can only start one URI. It starts the
     /// chosen song itself (`startURI`), so it's what's heard; this then
     /// re-plays it inside its playlist or album over the Web API, at the
     /// spot it has reached, so the following songs come from the context
@@ -280,8 +289,8 @@ final class SpotifyMusic: MusicService {
     /// The phone's Spotify, if the Web API lists exactly one phone. With
     /// several (another phone on the account) it can't tell which is this
     /// one, so it skips to the reconnect rather than play on the wrong one.
-    private func thisPhoneID() async -> String? {
-        let phones = (try? await api.devices())?.filter { $0.type == "Smartphone" && $0.id != nil } ?? []
+    private func thisPhoneID() async throws -> String? {
+        let phones = try await api.devices().filter { $0.type == "Smartphone" && $0.id != nil }
         return phones.count == 1 ? phones[0].id : nil
     }
 
@@ -326,19 +335,81 @@ final class SpotifyMusic: MusicService {
         }
     }
 
-    private func wakeSpotify(for request: PlayRequest) {
-        log("play by waking the Spotify app (no active device)")
-        pendingStart = request.singleURI == nil ? (request, Date(), playID) : nil
-        Task {
-            if await !remote.authorizeAndPlayURI(request.startURI) {
-                onNotice?(Notice(text: "Install the Spotify app to play music."))
+    /// The Library link only navigates. Keep enough background time to wait
+    /// for this phone to appear in Connect and issue the separate play request.
+    /// nil resumes the existing song rather than restarting it.
+    private func wakeSpotify(for request: PlayRequest? = nil, revertingTo previous: NowPlaying? = nil) {
+        cancelLibraryWake()
+        libraryWakeFailure = nil
+        let id = playID
+        let session = auth.sessionID
+        libraryWakeBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Start Spotify playback") { [weak self] in
+            self?.cancelLibraryWake()
+        }
+        let backgroundTask = libraryWakeBackgroundTask
+        libraryWakeTask = Task {
+            defer {
+                // An older cancelled task must not end a newer wake's assertion.
+                if id == playID, libraryWakeBackgroundTask == backgroundTask {
+                    libraryWakeTask = nil
+                    endLibraryWakeBackgroundTask()
+                }
+            }
+            do {
+                try Task.checkCancellation()
+                guard auth.isSignedIn, auth.sessionID == session else { return }
+                // Refresh credentials before handing the foreground to Spotify.
+                _ = try await auth.accessToken()
+                try Task.checkCancellation()
+                log("opening Spotify Library for playback")
+                guard await UIApplication.shared.open(URL(string: "spotify:collection")!) else {
+                    throw SpotifyAPI.APIError.http(status: 0, reason: nil, message: "Install the Spotify app to play music.")
+                }
+                for attempt in 0..<12 {
+                    try await Task.sleep(for: .milliseconds(attempt == 0 ? 500 : 1000))
+                    guard id == playID, auth.isSignedIn, auth.sessionID == session else { return }
+                    let phone = try await thisPhoneID()
+                    try Task.checkCancellation()
+                    guard auth.isSignedIn, auth.sessionID == session else { return }
+                    log("Library wake attempt \(attempt + 1): phone \(phone == nil ? "unavailable" : "available")")
+                    guard let phone else { continue }
+                    do {
+                        if let request { try await sendPlay(request, deviceID: phone) }
+                        else { try await api.resume(deviceID: phone) }
+                        log("play via Web API after opening Spotify Library")
+                        refreshSoon()
+                        return
+                    } catch let error as SpotifyAPI.APIError where error.isNoActiveDevice {
+                        // The phone can be listed before it accepts commands.
+                    }
+                }
+                throw SpotifyAPI.APIError.http(status: 0, reason: nil,
+                    message: "Spotify opened, but this phone wasn't ready for playback. Tap Play in Spotify once, then return and try again.")
+            } catch {
+                guard !Task.isCancelled, id == playID, auth.isSignedIn, auth.sessionID == session else { return }
+                if let previous { nowPlaying = previous }
+                log("Spotify Library playback failed: \(error.localizedDescription)")
+                if isActive { onNotice?(Notice(text: error.localizedDescription)) }
+                else { libraryWakeFailure = error.localizedDescription }
             }
         }
     }
 
+    private func endLibraryWakeBackgroundTask() {
+        guard libraryWakeBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(libraryWakeBackgroundTask)
+        libraryWakeBackgroundTask = .invalid
+    }
+
+    private func cancelLibraryWake() {
+        libraryWakeTask?.cancel()
+        libraryWakeTask = nil
+        endLibraryWakeBackgroundTask()
+    }
+
     func openSpotify() {
-        // "" resumes whatever Spotify last played, then returns here.
-        Task { _ = await remote.authorizeAndPlayURI("") }
+        playID += 1
+        wakeSpotify()
     }
 
     func togglePause() {
@@ -364,18 +435,19 @@ final class SpotifyMusic: MusicService {
     /// Resume over the Web API, else a quiet reconnect, else wake Spotify
     /// (which resumes its last song). Puts the shown state back if all fail.
     private func resumeWithFallbacks(revertingTo previous: NowPlaying? = nil) {
+        let id = playID
         Task {
             do {
                 try await api.resume()
                 refreshSoon()
             } catch let error as SpotifyAPI.APIError where error.isNoActiveDevice {
+                guard id == playID else { return }
                 if await reconnectRemote(), let player {
+                    guard id == playID else { return }
                     player.resume(nil)
-                } else if await !remote.authorizeAndPlayURI("") {
-                    if let previous { nowPlaying = previous }
-                    onNotice?(Notice(text: "Install the Spotify app to play music."))
-                }
+                } else if id == playID { wakeSpotify(revertingTo: previous) }
             } catch {
+                guard id == playID else { return }
                 if let previous { nowPlaying = previous }
                 report(error)
             }
@@ -445,6 +517,10 @@ final class SpotifyMusic: MusicService {
     /// the Web API poll keeps state current until a play wakes Spotify.
     func appBecameActive() {
         isActive = true
+        if let message = libraryWakeFailure {
+            libraryWakeFailure = nil
+            onNotice?(Notice(text: message))
+        }
         connectRemote()
         // Read state from the Web API only if App Remote hasn't connected by
         // then (`refreshSoon` re-checks after its delay).
@@ -504,12 +580,6 @@ final class SpotifyMusic: MusicService {
         }
         // A new connection is a fresh chance for covers that failed before.
         lastImageID = nil
-        if let pending = pendingStart {
-            pendingStart = nil
-            if pending.at.timeIntervalSinceNow > -60 {
-                jumpToStart(of: pending.request, id: pending.id, startedAt: Date())
-            }
-        }
     }
 
     fileprivate func remoteFailed(_ error: Error?) {

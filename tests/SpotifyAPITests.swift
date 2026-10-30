@@ -46,6 +46,24 @@ struct SpotifyAPITests {
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let api = SpotifyAPI(auth: SpotifyAuth(), session: session)
+        for deviceID in [nil, "woken-phone"] as [String?] {
+            SpotifyStub.statuses = [204]
+            SpotifyStub.requests = []
+            try await api.resume(deviceID: deviceID)
+            let request = SpotifyStub.requests[0]
+            precondition(request.method == "PUT" && request.path == "/v1/me/player/play")
+            precondition(request.body.isEmpty, "Resume must preserve the current song and position")
+            let query = URLComponents(url: SpotifyStub.lastURL!, resolvingAgainstBaseURL: false)!.queryItems
+            precondition(query?.first { $0.name == "device_id" }?.value == deviceID,
+                         "Library wake must target the phone, while ordinary resume keeps the active device")
+        }
+        SpotifyStub.statuses = [204]
+        try await api.play(contextURI: "spotify:playlist:source", offsetURI: "spotify:track:chosen", deviceID: "woken-phone")
+        let playBody = try JSONSerialization.jsonObject(with: SpotifyStub.requests.last!.body) as! [String: Any]
+        precondition(playBody["context_uri"] as? String == "spotify:playlist:source")
+        precondition((playBody["offset"] as? [String: String])?["uri"] == "spotify:track:chosen",
+                     "Starting after a Library wake must preserve the chosen song inside its playlist")
+        print("Playback request checks passed: device-targeted resume, preserved position, playlist song offset")
         let restricted: [String: Any] = [
             "id": "restricted", "uri": "spotify:track:restricted", "name": "Source song",
             "is_playable": false, "restrictions": ["reason": "market"],

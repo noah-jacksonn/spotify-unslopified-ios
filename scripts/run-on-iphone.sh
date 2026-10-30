@@ -14,6 +14,7 @@
 #   scripts/run-on-iphone.sh --library       open All playlists
 #   scripts/run-on-iphone.sh --playlist      open the first Home playlist
 #   scripts/run-on-iphone.sh --play          start the first Home playlist (mini player)
+#   scripts/run-on-iphone.sh --library-wake  test opening Spotify Library and starting the first Home playlist
 #   scripts/run-on-iphone.sh --artist        open the first artist a search finds
 #   scripts/run-on-iphone.sh --player-artist open the current artist inside the player
 #   scripts/run-on-iphone.sh --player-album  open the current album inside the player
@@ -44,6 +45,7 @@ while [ $# -gt 0 ]; do
     --library) APP_ARGS+=(-openLibrary) ;;
     --playlist) APP_ARGS+=(-openPlaylist) ;;
     --play) APP_ARGS+=(-autoplay) ;;
+    --library-wake) APP_ARGS+=(-autoplay -forceLibraryWake) ;;
     --artist) APP_ARGS+=(-openArtist) ;;
     --player-artist) APP_ARGS+=(-openPlayerArtist) ;;
     --player-album) APP_ARGS+=(-openPlayerAlbum) ;;
