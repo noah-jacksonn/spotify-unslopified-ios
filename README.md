@@ -32,7 +32,7 @@ Just looking? Run in the iPhone simulator and tap **Try with sample music**. No 
 
 Create a playlist from **All playlists → Imported**, then add audio from Files. Imported songs play on your device, with editable titles, artists, creation dates, artwork and lyrics.
 
-To share your library with the [Spotify Unslopified Chrome extension](https://github.com/noah-jacksonn/spotify-focused):
+To share your library with the [Spotify Unslopified Chrome extension](https://github.com/noah-jacksonn/spotify-unslopified-web):
 
 1. Create a dedicated iCloud Drive folder, such as **Unslopified Music**.
 2. Choose **Connect music folder** in the iPhone app and select that parent folder. Connect the same folder in the extension on your Mac, using the same iCloud account.
