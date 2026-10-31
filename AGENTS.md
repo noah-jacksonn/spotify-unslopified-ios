@@ -13,6 +13,8 @@ Spotify Unslopified is a native SwiftUI remote for Spotify: a quiet Home of play
 
 ## Design system
 
+- Keep interfaces minimalist. Use labels sparingly and keep them short. Show guidance at the action where it helps.
+
 - The look is locked in from Noah's on-phone segtest (2026-10-02): Ink palette, SF Rounded, a soft glow behind pages (colored from the current song's art since 2026-10-03, the accent when nothing plays; `look.glow`), calm 0.35 s easing, a List Home with 88 pt round-cornered art, the wordmark header, airy spacing, a full-width Bar mini player and the Poster full player. It lives in `Focused/Design/Look.swift` and is read from `@Environment(\.look)`. Screens use `look.palette`, `look.font`/`look.display`, `look.artRadius`, `.surface(look, in:)`, `look.animation`; never hard-code colors or fonts.
 - Deployment target is iOS 26 (Noah's phone), so iOS 26 APIs (Liquid Glass, MeshGradient) are available without availability checks.
 
@@ -75,6 +77,8 @@ Commit directly to `main`; push only when asked. Regenerate the app icon with `n
 - `scripts/run-on-iphone.sh --edit-cover` opens the editor; combine with `--preview` for sample playlists. `tests/run-playlist-cover-tests.sh` checks crop bounds and export geometry; upload encoding/retries are covered by `tests/run-spotify-api-tests.sh`.
 
 ## Imported audio
+
+- Imported playlist covers keep the selected photo bytes, an oriented 2048px edit preview, and viewport-relative `zoom`/`x`/`y` in `cover.json`. `CoverStorage` and Chrome's `cover-editor.js` share the format. Immutable `cover-original-*`, `cover-source-*`, and `cover-rendered-*` assets are written before the recipe; the recipe's rendered file is authoritative, with `cover.jpg` retained for older clients. Never use a changed image with an older crop. Private covers retain the same data under `.cover-edits` and copy it when exported to the shared folder.
 
 - Create imported playlists from the Home account menu or Library's Imported filter, then import audio from Files. `LocalLibrary` stores songs by content hash under Application Support/Suno, with playlist memberships and covers saved locally. Deleting a playlist keeps songs shared by other imported playlists.
 - `CombinedMusic` routes Spotify and imported songs to separate queues. `LocalPlayback` uses AVPlayer with background audio and lock-screen commands; switching to imported audio suspends pending Spotify playback. Selecting a local queue occurrence preserves its remaining songs and previous-song history.

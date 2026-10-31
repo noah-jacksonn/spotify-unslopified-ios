@@ -22,7 +22,10 @@ struct LibrarySheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: look.gap * 0.7) {
                     filters
-                    if filter == .imported { createPlaylistButton }
+                    if filter == .imported {
+                        createPlaylistButton
+                        SharedFolderControls()
+                    }
                     ForEach(visibleImported) { playlist in
                         ImportedPlaylistLibraryRow(playlist: playlist)
                     }
@@ -30,8 +33,8 @@ struct LibrarySheet: View {
                     if visible.isEmpty && visibleImported.isEmpty {
                         if model.libraryState == .loading && filter != .imported {
                             BarsLoader().frame(maxWidth: .infinity).padding(.top, 40)
-                        } else {
-                            Text(filter == .imported ? "Create a playlist for your audio files." : "No playlists here")
+                        } else if filter != .imported || !query.isEmpty {
+                            Text("No playlists here")
                                 .font(look.font(15))
                                 .foregroundStyle(look.palette.muted)
                                 .padding(.top, 20)

@@ -8,6 +8,7 @@ struct CreateImportedPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var cover: Data?
+    @State private var coverEdit: CoverEdit?
     @State private var coverID = UUID().uuidString
     @State private var editsCover = false
     @State private var selection: PhotosPickerItem?
@@ -24,14 +25,17 @@ struct CreateImportedPlaylistView: View {
                         .focused($nameFocused)
                         .submitLabel(.done)
                         .accessibilityIdentifier("importedPlaylist.name")
-                    PhotosPicker(selection: $selection, matching: .images, preferredItemEncoding: .current) {
-                        HStack(spacing: 12) {
-                            ArtworkView(artwork: artwork).frame(width: 56, height: 56).artClip(look, size: 56)
-                            Text(cover == nil ? "Choose cover" : "Change cover")
-                        }
+                    if cover == nil {
+                        PhotosPicker(selection: $selection, matching: .images, preferredItemEncoding: .current) { coverLabel }
+                    } else {
+                        Button { selection = nil; editsCover = true } label: { coverLabel }
                     }
                 } footer: {
-                    Text("Import audio files from Files after creating your playlist.")
+                    if let folder = model.localLibrary.sharedFolder {
+                        Text("Saves to \(folder.name).")
+                    } else {
+                        Text("Connect an iCloud folder to sync with Chrome.")
+                    }
                 }
                 if let error { Text(error).foregroundStyle(look.palette.muted) }
             }
@@ -49,11 +53,12 @@ struct CreateImportedPlaylistView: View {
                 if item != nil { editsCover = true }
             }
             .sheet(isPresented: $editsCover, onDismiss: { selection = nil }) {
-                CoverEditor(title: name.isEmpty ? "New playlist" : name, artwork: artwork, initialSelection: selection) { jpeg in
+                CoverEditor(title: name.isEmpty ? "New playlist" : name, artwork: artwork, initialSelection: selection, initialEdit: coverEdit) { jpeg, edit in
                     let id = UUID().uuidString
                     if let image = UIImage(data: jpeg) { ImageCache.shared.store(image, id: id) }
                     coverID = id
                     cover = jpeg
+                    coverEdit = edit
                 }
                 .environment(\.look, look)
             }
@@ -61,9 +66,16 @@ struct CreateImportedPlaylistView: View {
         }
     }
 
+    private var coverLabel: some View {
+        HStack(spacing: 12) {
+            ArtworkView(artwork: artwork).frame(width: 56, height: 56).artClip(look, size: 56)
+            Text(cover == nil ? "Choose cover" : "Change cover")
+        }
+    }
+
     private func create() {
         do {
-            let playlist = try model.localLibrary.createPlaylist(name: name, cover: cover)
+            let playlist = try model.localLibrary.createPlaylist(name: name, cover: cover, coverEdit: coverEdit)
             dismiss()
             onCreate(playlist)
         } catch { self.error = "Couldn't create the playlist. \(error.localizedDescription)" }

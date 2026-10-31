@@ -44,7 +44,11 @@ private struct ImportedPlaylistActions: ViewModifier {
                         model.deleteImportedPlaylist(playlist)
                     }
                 } message: {
-                    Text("Songs used only by this playlist will also be removed from the app. Songs in other imported playlists will stay.")
+                    if model.localLibrary.sharedFolder != nil {
+                        Text("This playlist will be archived on all connected devices. Its files will stay in the shared folder.")
+                    } else {
+                        Text("Songs used only by this playlist will also be removed from the app. Songs in other imported playlists will stay.")
+                    }
                 }
             }
     }

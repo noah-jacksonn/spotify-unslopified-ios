@@ -25,6 +25,9 @@ struct PlaylistCoverTests {
         }
         let portrait = PlaylistCoverCrop().imageRect(imageSize: CGSize(width: 100, height: 200), side: 640)
         precondition(portrait == CGRect(x: 0, y: -320, width: 640, height: 1280), "Initial crop is centered")
+        let sharedExample = PlaylistCoverCrop(zoom: 2, x: -0.25, y: 0.4).imageRect(imageSize: CGSize(width: 4000, height: 3000), side: 640)
+        precondition(abs(sharedExample.minX - -693.3333333333333) < 1e-8 && abs(sharedExample.minY - -64) < 1e-8,
+                     "Shared crop fixture must match the Chrome editor")
         print("Playlist cover crop checks passed: portrait, landscape, square, panorama, zoom limits, pan limits, aspect ratio, preview/export agreement")
     }
 }

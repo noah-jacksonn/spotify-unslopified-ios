@@ -118,6 +118,7 @@ struct ImportedPlaylistView: View {
             }
             .padding(look.margin)
         }
+        .refreshable { model.localLibrary.reload() }
         .pageBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -160,8 +161,9 @@ struct ImportedPlaylistView: View {
             ImportedSongEditor(song: song).environment(\.look, look)
         }
         .sheet(isPresented: $editsCover) {
-            CoverEditor(title: title, artwork: model.localLibrary.artwork(for: playlistID)) { jpeg in
-                try model.localLibrary.saveCover(jpeg, playlistID: playlistID)
+            CoverEditor(title: title, artwork: model.localLibrary.artwork(for: playlistID),
+                        loadEdit: { try model.localLibrary.coverEdit(for: playlistID) }) { jpeg, edit in
+                try model.localLibrary.saveCover(jpeg, playlistID: playlistID, edit: edit)
             }
             .environment(\.look, look)
         }
@@ -172,7 +174,13 @@ struct ImportedPlaylistView: View {
 }
 
 private struct ImportedSongEditor: View {
-    @State var song: LocalSong
+    private let original: LocalSong
+    @State private var song: LocalSong
+
+    init(song: LocalSong) {
+        original = song
+        _song = State(initialValue: song)
+    }
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.look) private var look
@@ -191,6 +199,9 @@ private struct ImportedSongEditor: View {
                     Button("Change artwork", systemImage: "photo") { editsCover = true }
                     TextField("Title", text: $song.title)
                     TextField("Artist", text: $song.artist)
+                    if song.sharedDirectory != nil {
+                        TextField("Track order", value: $song.sharedOrder, format: .number).keyboardType(.decimalPad)
+                    }
                     TextField("Source link", text: $source).keyboardType(.URL).textInputAutocapitalization(.never)
                     Toggle("Creation date known", isOn: $hasDate)
                     if hasDate { DatePicker("Created", selection: $date, displayedComponents: .date) }
@@ -219,7 +230,7 @@ private struct ImportedSongEditor: View {
             .sheet(isPresented: $editsCover, onDismiss: {
                 song.artworkFile = model.localLibrary.song(uri: song.uri)?.artworkFile
             }) {
-                CoverEditor(title: song.title, artwork: Artwork(url: song.artworkURL, seed: nil)) { jpeg in
+                CoverEditor(title: song.title, artwork: Artwork(url: song.artworkURL, seed: nil)) { jpeg, _ in
                     try model.localLibrary.saveCover(jpeg, for: song)
                     (model.music as? CombinedMusic)?.local.refresh(songs: model.localLibrary.songs)
                 }
@@ -251,7 +262,7 @@ private struct ImportedSongEditor: View {
         song.createdAt = hasDate ? date : nil
         song.lyrics = lyrics.isEmpty ? nil : lyrics
         do {
-            try model.localLibrary.update(song)
+            try model.localLibrary.update(song, original: original)
             (model.music as? CombinedMusic)?.local.refresh(songs: model.localLibrary.songs)
             model.lyrics.loadCurrent(model.music?.nowPlaying, retry: true)
             dismiss()

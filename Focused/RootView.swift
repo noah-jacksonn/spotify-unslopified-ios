@@ -25,6 +25,18 @@ struct RootView: View {
         .tint(look.palette.accent)
         .animation(look.animation, value: model.mode)
         .background { ArtTintWatcher(tint: $artTint) }
+        .task(id: scenePhase == .active ? model.localLibrary.sharedFolder?.key : nil) {
+            guard scenePhase == .active, model.localLibrary.sharedFolder != nil else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                if !model.localLibrary.isImporting, !model.localLibrary.refreshingFolder { model.localLibrary.reload() }
+            }
+        }
+        .onChange(of: model.localLibrary.songs) {
+            if let music = model.music as? CombinedMusic, music.usesLocalPlayback {
+                music.local.refresh(songs: model.localLibrary.songs)
+            }
+        }
         .onAppear { applyAppearance() }
         .onChange(of: appearanceOverride) { applyAppearance() }
         .onChange(of: scenePhase) { _, phase in
