@@ -107,7 +107,11 @@ struct LyricsSheet: View {
                 .padding(26)
             }
         } else {
-            message("No lyrics found", detail: "Lyrics aren’t available for this version of the song yet.", retry: true)
+            if state.trackURI.hasPrefix("suno:") {
+                message("No lyrics added", detail: "Add lyrics in this song’s details.")
+            } else {
+                message("No lyrics found", detail: "Lyrics aren’t available for this version of the song yet.", retry: true)
+            }
         }
     }
 

@@ -21,8 +21,8 @@ final class SleepTimer {
 
     /// Set by AppModel.
     @ObservationIgnored var music: () -> (any MusicService)? = { nil }
-    /// Only Spotify plays on with the app in the background; the preview
-    /// is paused when the app is opened again instead.
+    /// Whether playback needs Spotify's remote background pause route.
+    /// Imported audio keeps the local timer running with background playback.
     @ObservationIgnored var usesSpotify: () -> Bool = { false }
 
     private let auth: SpotifyAuth
@@ -90,8 +90,9 @@ final class SleepTimer {
     }
 
     func appEnteredBackground() {
+        guard usesSpotify() else { return }
         localTimer?.cancel()
-        guard endsAt != nil, usesSpotify(), let tokens = auth.tokens else { return }
+        guard endsAt != nil, let tokens = auth.tokens else { return }
         scheduleNextStep(with: tokens)
     }
 
@@ -217,6 +218,7 @@ final class SleepTimer {
         let canRetry = inWindow && (error != nil || status == 429 || (500..<600).contains(status))
 
         if kind == Self.pauseKind {
+            guard usesSpotify() else { return }
             if inWindow, status == 401, let tokens = auth.tokens {
                 // The token ran out while iOS held the pause back: refresh,
                 // and the refresh schedules the pause again.
@@ -238,7 +240,7 @@ final class SleepTimer {
                 // While the app is open its own timer is in charge. (Read
                 // from UIKit: after a relaunch for these events, no scene
                 // phase change has come.)
-                if UIApplication.shared.applicationState == .background, let tokens = auth.tokens { scheduleNextStep(with: tokens) }
+                if usesSpotify(), UIApplication.shared.applicationState == .background, let tokens = auth.tokens { scheduleNextStep(with: tokens) }
             } else if used != auth.tokens?.refreshToken {
                 // An older chain the app has since replaced; leave the timer.
             } else if canRetry {

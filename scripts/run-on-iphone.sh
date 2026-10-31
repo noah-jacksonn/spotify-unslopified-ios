@@ -38,6 +38,10 @@ while [ $# -gt 0 ]; do
     --console) CONSOLE=1 ;;
     --preview) APP_ARGS+=(-preview) ;;
     --search) APP_ARGS+=(-openSearch) ;;
+    --suno) APP_ARGS+=(-openSuno) ;;
+    --imported-playlist) APP_ARGS+=(-openImportedPlaylist) ;;
+    --create-playlist) APP_ARGS+=(-createImportedPlaylist) ;;
+    --imported-library) APP_ARGS+=(-openImportedLibrary) ;;
     --lyrics-search) APP_ARGS+=(-openLyricsSearch) ;;
     --queue) APP_ARGS+=(-openQueue) ;;
     --daily-five|--discover) APP_ARGS+=(-openDailyFive) ;;

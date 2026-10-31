@@ -2,8 +2,21 @@ import Foundation
 
 // Token source for the standalone decoder test; no Keychain or real requests.
 final class SpotifyAuth {
-    func accessToken() async throws -> String { "test-token" }
+    var beforeAccessToken: (() async -> Void)?
+    func accessToken() async throws -> String {
+        await beforeAccessToken?()
+        return "test-token"
+    }
     func refresh() async throws {}
+}
+
+private actor TokenGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async { await withCheckedContinuation { continuation = $0 } }
+    func waitUntilRequested() async {
+        while continuation == nil { await Task.yield() }
+    }
+    func release() { continuation?.resume(); continuation = nil }
 }
 
 private final class SpotifyStub: URLProtocol {
@@ -46,6 +59,22 @@ struct SpotifyAPITests {
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let api = SpotifyAPI(auth: SpotifyAuth(), session: session)
+        let gate = TokenGate()
+        let delayedAuth = SpotifyAuth()
+        delayedAuth.beforeAccessToken = { await gate.wait() }
+        let delayedAPI = SpotifyAPI(auth: delayedAuth, session: session)
+        SpotifyStub.requests = []
+        let stalePlay = Task { try await delayedAPI.resume() }
+        await gate.waitUntilRequested()
+        stalePlay.cancel()
+        await gate.release()
+        do {
+            try await stalePlay.value
+            preconditionFailure("A cancelled playback request must not resume Spotify after token refresh")
+        } catch {
+            precondition(error is CancellationError || (error as? URLError)?.code == .cancelled)
+        }
+        precondition(SpotifyStub.requests.isEmpty, "Cancelled playback must not reach Spotify")
         for deviceID in [nil, "woken-phone"] as [String?] {
             SpotifyStub.statuses = [204]
             SpotifyStub.requests = []

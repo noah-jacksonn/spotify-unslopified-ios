@@ -343,10 +343,12 @@ struct AddToPlaylistMenu: View {
         Menu {
             Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue([track]) }
             SeeAlbumButton(track: track)
-            Menu("Add to playlist", systemImage: "plus") {
-                ForEach(model.playlists.filter(\.isMine)) { playlist in
-                    Button(playlist.name) {
-                        Task { await add(to: playlist) }
+            if !track.uri.hasPrefix("suno:") {
+                Menu("Add to playlist", systemImage: "plus") {
+                    ForEach(model.playlists.filter(\.isMine)) { playlist in
+                        Button(playlist.name) {
+                            Task { await add(to: playlist) }
+                        }
                     }
                 }
             }

@@ -7,6 +7,7 @@ struct QueueSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var queue: PlaybackQueue?
+    @State private var localQueueIndex: Int?
     @State private var error: String?
     @State private var loading = false
     @State private var refreshPending = false
@@ -26,11 +27,11 @@ struct QueueSheet: View {
                         VStack(alignment: .leading, spacing: 8) {
                             SectionTitle(text: "Next up")
                             // A song may appear more than once; identify occurrences.
-                            ForEach(Array(queue.upcoming.enumerated()), id: \.offset) { _, track in
-                                queueRow(track)
+                            ForEach(Array(queue.upcoming.enumerated()), id: \.offset) { offset, track in
+                                queueRow(track, upcomingOffset: offset)
                             }
                         }
-                    } else if queue == nil && loading {
+                    } else if queue == nil && error == nil {
                         BarsLoader().frame(maxWidth: .infinity, minHeight: 160)
                     }
                     if let error {
@@ -40,18 +41,22 @@ struct QueueSheet: View {
                     if model.pendingQueueRequests > 0 {
                         HStack { BarsLoader(size: 16, delay: .zero); Text("Adding to queue…").font(look.font(14)) }
                     }
-                    Text("To reorder or remove songs, open the queue in Spotify.")
-                        .font(look.font(12)).foregroundStyle(look.palette.muted)
+                    if showsSpotifyMessage && !isEmptyQueue { spotifyMessage }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(look.margin)
             }
-            .defaultScrollAnchor(centersEmptyMessage ? .center : .top, for: .alignment)
+            .overlay {
+                if showsSpotifyMessage && isEmptyQueue {
+                    spotifyMessage.padding(look.margin)
+                }
+            }
             .refreshable { await refresh() }
             .pageBackground()
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                CloseToolbarItem { dismiss() }
             }
             .appDestinations()
         }
@@ -72,15 +77,27 @@ struct QueueSheet: View {
         }
     }
 
-    private var centersEmptyMessage: Bool {
+    private var isEmptyQueue: Bool {
         queue?.current == nil && queue?.upcoming.isEmpty == true
             && error == nil && model.pendingQueueRequests == 0
     }
 
-    private func queueRow(_ track: Track, isCurrent: Bool = false) -> some View {
+    private var showsSpotifyMessage: Bool {
+        queue != nil && (model.music as? CombinedMusic)?.usesLocalPlayback != true
+    }
+
+    private var spotifyMessage: some View {
+        Text("To reorder or remove songs, open the queue in Spotify.")
+            .font(look.font(12))
+            .foregroundStyle(look.palette.muted)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func queueRow(_ track: Track, isCurrent: Bool = false, upcomingOffset: Int? = nil) -> some View {
         HStack(spacing: 12) {
             Button {
-                play(track, isCurrent: isCurrent)
+                play(track, isCurrent: isCurrent, upcomingOffset: upcomingOffset)
             } label: {
                 HStack(spacing: 12) {
                     ArtworkView(artwork: Artwork(url: track.imageURL, seed: track.demoSeed))
@@ -99,15 +116,20 @@ struct QueueSheet: View {
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
-        .songContextMenu(track, play: { play(track, isCurrent: isCurrent) })
+        .songContextMenu(track, play: { play(track, isCurrent: isCurrent, upcomingOffset: upcomingOffset) })
         // In a queue, swiping implies removing this occurrence. Spotify
         // doesn't expose removal, so don't reuse the browse-row add gesture.
     }
 
-    private func play(_ track: Track, isCurrent: Bool) {
+    private func play(_ track: Track, isCurrent: Bool, upcomingOffset: Int?) {
         guard let music = model.music else { return }
         if isCurrent, let current = music.nowPlaying, current.trackURI == track.uri {
             if current.isPaused { music.togglePause() }
+            return
+        }
+        if let combined = music as? CombinedMusic, combined.usesLocalPlayback,
+           let localQueueIndex, let upcomingOffset {
+            combined.playQueuedSong(at: localQueueIndex + 1 + upcomingOffset, uri: track.uri)
             return
         }
         // Play this song just like a search result. Spotify's queue response
@@ -126,8 +148,13 @@ struct QueueSheet: View {
             do {
                 let result = try await music.playbackQueue()
                 guard !Task.isCancelled, model.music === music else { return }
-                queue = result
-                error = nil
+                withTransaction(Transaction(animation: nil)) {
+                    queue = result
+                    if let combined = music as? CombinedMusic, combined.usesLocalPlayback {
+                        localQueueIndex = combined.local.index
+                    } else { localQueueIndex = nil }
+                    error = nil
+                }
             } catch {
                 guard !Task.isCancelled, model.music === music else { return }
                 self.error = "Couldn’t refresh your queue. " + error.localizedDescription

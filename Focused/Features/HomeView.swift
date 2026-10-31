@@ -15,6 +15,9 @@ struct HomeView: View {
     @State private var barsTaps = 0
     @State private var barsPressed = false
     @State private var showsSleepTimer = false
+    @State private var showsCreatePlaylist = false
+    @State private var pendingPlaylist: ImportedPlaylistRoute?
+    @State private var openedPlaylist: ImportedPlaylistRoute?
     @AppStorage("home.hidesDiscover") private var hidesDiscover = false
     @FocusState private var searchFocused: Bool
     @Namespace private var morph
@@ -28,9 +31,18 @@ struct HomeView: View {
                         .transition(.opacity.combined(with: .offset(y: 16)))
                 } else {
                     Group {
-                        content
+                        VStack(spacing: look.gap) {
+                            content
+                            ForEach(model.localLibrary.homePlaylists.filter { playlist in
+                                playlist.id != ImportedPlaylist.legacyID || !model.homePlaylists.contains {
+                                    $0.name.caseInsensitiveCompare("End of 2026") == .orderedSame
+                                }
+                            }) { playlist in
+                                ImportedPlaylistHomeEntry(playlist: playlist).padding(.horizontal, look.margin)
+                            }
+                        }
                         VStack(spacing: 12) {
-                            if !model.homePlaylists.isEmpty { allPlaylistsButton }
+                            if !model.homePlaylists.isEmpty || !model.localLibrary.playlists.isEmpty { allPlaylistsButton }
                             if !hidesDiscover { dailyFiveButton }
                         }
                     }
@@ -46,6 +58,15 @@ struct HomeView: View {
         .pageBackground()
         .animation(look.animation, value: model.home.ids)
         .animation(look.animation, value: hidesDiscover)
+        .animation(look.animation, value: model.localLibrary.homePlaylists)
+        .sheet(isPresented: $showsCreatePlaylist, onDismiss: {
+            openedPlaylist = pendingPlaylist
+            pendingPlaylist = nil
+        }) {
+            CreateImportedPlaylistView { pendingPlaylist = ImportedPlaylistRoute(id: $0.id) }
+                .environment(\.look, look)
+        }
+        .navigationDestination(item: $openedPlaylist) { ImportedPlaylistView(playlistID: $0.id) }
         .sheet(isPresented: $showsSleepTimer) {
             SleepTimerSheet().environment(\.look, look)
         }
@@ -58,6 +79,7 @@ struct HomeView: View {
                 setSearching(true)
             }
             if arguments.contains("-openSleepTimer") { showsSleepTimer = true }
+            if arguments.contains("-createImportedPlaylist") { showsCreatePlaylist = true }
             #endif
         }
     }
@@ -192,6 +214,7 @@ struct HomeView: View {
 
     private var accountMenu: some View {
         Menu {
+            Button("Create playlist", systemImage: "plus") { showsCreatePlaylist = true }
             Button("Sleep timer", systemImage: "moon.zzz") { showsSleepTimer = true }
             if hidesDiscover {
                 Button("Show Discover", systemImage: "eye") { hidesDiscover = false }
@@ -218,14 +241,18 @@ struct HomeView: View {
     private var content: some View {
         if isLoading {
             // Only before anything has loaded; a refresh keeps the list up.
-            HomeLoadingView()
+            if !model.home.ids.isEmpty || model.localLibrary.homePlaylists.isEmpty {
+                HomeLoadingView(playlistCount: max(1, model.home.ids.count))
+            }
         } else if case .failed(let message) = model.libraryState {
             emptyState(title: "Couldn't load your playlists", detail: message, action: "Try again") {
                 Task { await model.loadLibrary() }
             }
         } else if model.homePlaylists.isEmpty {
-            emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
-                       action: "Choose playlists") { showsLibrary = true }
+            if model.localLibrary.homePlaylists.isEmpty {
+                emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
+                           action: "Choose playlists") { showsLibrary = true }
+            }
         } else {
             PlaylistList(playlists: model.homePlaylists)
         }
@@ -322,6 +349,10 @@ private struct PlaylistList: View {
                     },
                     trailing: RowSwipe(systemName: "shuffle", label: "Shuffle") { shuffle(playlist) }
                 )
+                if playlist.name.caseInsensitiveCompare("End of 2026") == .orderedSame,
+                   let imported = model.localLibrary.homePlaylists.first(where: { $0.id == ImportedPlaylist.legacyID }) {
+                    ImportedPlaylistHomeEntry(playlist: imported)
+                }
             }
         }
         .deletePlaylistConfirmation($deleting)
@@ -367,9 +398,15 @@ private struct PlaylistList: View {
 
 /// Home's loader: `BarsLoader` where the list will appear.
 private struct HomeLoadingView: View {
+    let playlistCount: Int
+    @Environment(\.look) private var look
+
     var body: some View {
+        let height = CGFloat(playlistCount) * 88 + CGFloat(max(0, playlistCount - 1)) * look.gap
         BarsLoader()
-            .frame(maxWidth: .infinity, minHeight: 220)
+            .frame(maxWidth: .infinity)
+            .frame(height: min(220, height))
+            .frame(height: height, alignment: .top)
             .accessibilityLabel("Loading your playlists")
     }
 }

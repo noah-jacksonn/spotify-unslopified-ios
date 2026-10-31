@@ -117,8 +117,10 @@ struct DiscoverTracks: View {
         }
     }
 
-    private func play(_ index: Int) {
-        model.music?.play(.tracks(edition.picks[index...].map(\.track.uri)))
+    private func play(_ pick: DailyPick) {
+        // A song tap uses App Remote's direct-play path, like Search and Queue.
+        // Playing the whole edition is the separate "Play five" action.
+        model.music?.play(.tracks([pick.track.uri]))
     }
 
     private func artwork(_ pick: DailyPick) -> some View {
@@ -154,12 +156,12 @@ struct DiscoverTracks: View {
     private func editorial(_ pick: DailyPick, index: Int) -> some View {
         VStack(spacing: 18) {
             HStack(alignment: .top, spacing: 14) {
-                Button { play(index) } label: {
+                Button { play(pick) } label: {
                     artwork(pick).frame(width: 70, height: 70).clipShape(RoundedRectangle(cornerRadius: 18))
                 }
                 .buttonStyle(PressScale()).accessibilityLabel("Play \(pick.track.name)")
                 VStack(alignment: .leading, spacing: 3) {
-                    Button { play(index) } label: {
+                    Button { play(pick) } label: {
                         VStack(alignment: .leading, spacing: 5) { title(pick); artist(pick) }
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.plain)
@@ -174,7 +176,7 @@ struct DiscoverTracks: View {
             if index < edition.picks.count - 1 { Rectangle().fill(look.palette.line.opacity(0.5)).frame(height: 0.5) }
         }
         .queueOnSwipe(pick.track)
-        .songContextMenu(pick.track, play: { play(index) })
+        .songContextMenu(pick.track, play: { play(pick) })
     }
 
 }

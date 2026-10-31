@@ -11,17 +11,25 @@ extension View {
 private struct PlaylistCoverEditorPresentation: ViewModifier {
     @Binding var playlist: Playlist?
     @Environment(\.look) private var look
+    @Environment(AppModel.self) private var model
 
     func body(content: Content) -> some View {
         content.sheet(item: $playlist) { target in
-            PlaylistCoverEditor(playlist: target)
+            CoverEditor(title: target.name, artwork: model.artwork(for: target),
+                        saveTitle: model.mode == .preview ? "Save preview" : "Save to Spotify") { jpeg in
+                try await model.updateCover(jpeg, for: target)
+            }
                 .environment(\.look, look)
         }
     }
 }
 
-private struct PlaylistCoverEditor: View {
-    let playlist: Playlist
+struct CoverEditor: View {
+    let title: String
+    let artwork: Artwork
+    var saveTitle = "Save"
+    var initialSelection: PhotosPickerItem? = nil
+    var saveCover: (Data) async throws -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
     @Environment(\.dismiss) private var dismiss
@@ -38,7 +46,7 @@ private struct PlaylistCoverEditor: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    Text(playlist.name)
+                    Text(title)
                         .font(look.font(18, .semibold))
                         .foregroundStyle(look.palette.text)
                     GeometryReader { geometry in
@@ -73,7 +81,7 @@ private struct PlaylistCoverEditor: View {
                                 .accessibilityLabel("Cover crop preview")
                                 .accessibilityHint("Pinch to zoom and drag to position. Crop controls are below.")
                         } else {
-                            ArtworkView(artwork: model.artwork(for: playlist))
+                            ArtworkView(artwork: artwork)
                                 .frame(width: side, height: side)
                                 .clipped()
                         }
@@ -133,12 +141,13 @@ private struct PlaylistCoverEditor: View {
                     Button("Cancel") { dismiss() }.disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(model.mode == .preview ? "Save preview" : "Save to Spotify") { save() }
+                    Button(saveTitle) { save() }
                         .disabled(image == nil || loading || saving)
                 }
             }
             .tint(look.palette.accent)
             .interactiveDismissDisabled(saving)
+            .onAppear { if selection == nil { selection = initialSelection } }
             .task(id: selection) { await loadSelection() }
         }
     }
@@ -196,7 +205,7 @@ private struct PlaylistCoverEditor: View {
                     try PlaylistCoverImage.jpeg(image, crop: crop)
                 }.value
                 guard model.auth.sessionID == session, model.mode == mode else { throw CancellationError() }
-                try await model.updateCover(jpeg, for: playlist)
+                try await saveCover(jpeg)
                 dismiss()
             } catch {
                 self.error = "Couldn't save the cover. \(error.localizedDescription)"

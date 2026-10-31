@@ -146,8 +146,12 @@ struct MainView: View {
             }
         }
         if arguments.contains("-openDailyFive") { path.append(DailyFiveRoute()) }
+        if arguments.contains("-openSuno") || arguments.contains("-openImportedPlaylist"),
+           let first = model.localLibrary.playlists.first {
+            path.append(ImportedPlaylistRoute(id: first.id))
+        }
         if arguments.contains("-openQueue") { showsQueue = true }
-        if arguments.contains("-openLibrary") { showsLibrary = true }
+        if arguments.contains("-openLibrary") || arguments.contains("-openImportedLibrary") { showsLibrary = true }
         if arguments.contains("-openArtist") || arguments.contains("-openAlbum") {
             // The first artist a search turns up, or that artist's first album.
             Task {
@@ -175,6 +179,7 @@ extension View {
     /// each stack so they stay in step.
     func appDestinations() -> some View {
         navigationDestination(for: DailyFiveRoute.self) { _ in DailyFiveView() }
+            .navigationDestination(for: ImportedPlaylistRoute.self) { ImportedPlaylistView(playlistID: $0.id) }
             .navigationDestination(for: Playlist.self) { PlaylistView(playlist: $0) }
             .navigationDestination(for: CatalogItem.self) { CatalogPage(item: $0) }
     }

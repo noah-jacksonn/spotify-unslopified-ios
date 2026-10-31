@@ -34,6 +34,7 @@ final class LyricsState {
     private var lookupKey: String?
     @ObservationIgnored private var request: Task<Void, Never>?
     private let service: LyricsService
+    var localDocument: ((String) -> LyricsDocument?)?
 
     init(service: LyricsService? = nil) { self.service = service ?? LyricsService() }
 
@@ -53,9 +54,14 @@ final class LyricsState {
         request?.cancel()
         lookupKey = key
         trackURI = state.trackURI
-        document = sample ?? service.cachedLyrics(for: state)
+        document = sample ?? localDocument?(state.trackURI) ?? service.cachedLyrics(for: state)
         error = nil
         isLoading = document == nil
+        if state.trackURI.hasPrefix("suno:") {
+            isLoading = false
+            request = nil
+            return
+        }
         guard document == nil else { request = nil; return }
         request = Task { [weak self, service] in
             do {

@@ -199,12 +199,10 @@ private struct DailySourcesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        daily.setSources(playlists.filter { selected.contains($0.id) })
-                        dismiss()
-                    }
-                    .disabled(selected.isEmpty)
+                // Closing confirms the draft; Cancel explicitly discards it.
+                CloseToolbarItem(isEnabled: !selected.isEmpty, accessibilityLabel: "Save sources and close") {
+                    daily.setSources(playlists.filter { selected.contains($0.id) })
+                    dismiss()
                 }
             }
         }

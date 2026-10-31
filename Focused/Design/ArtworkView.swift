@@ -6,7 +6,6 @@ import UIKit
 struct ArtworkView: View {
     var artwork: Artwork
     @Environment(\.look) private var look
-    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
@@ -17,27 +16,49 @@ struct ArtworkView: View {
                 Rectangle().fill(look.palette.raised)
                     .overlay(Image(systemName: "music.note").font(.system(size: 22)).foregroundStyle(look.palette.muted))
             case .url, .image:
-                Rectangle().fill(look.palette.raised)
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFill()
-                        .transition(.opacity)
-                }
+                LoadedArtworkView(artwork: artwork)
+                    .id(key)
             }
-        }
-        .task(id: key) {
-            // Clear first so the previous cover doesn't sit beside a new
-            // title, and drop a result that arrives after the art changed.
-            image = nil
-            let loaded = await ImageCache.shared.image(for: artwork)
-            if !Task.isCancelled { image = loaded }
         }
     }
 
     private var key: String {
         switch artwork {
-        case .url(let url): url.absoluteString
-        case .image(let id): id
+        case .url(let url): "url:\(url.absoluteString)"
+        case .image(let id): "image:\(id)"
         default: ""
+        }
+    }
+}
+
+/// Each source owns its loading state so an old request cannot replace a new
+/// cover. Cached art is present on the first frame; only newly loaded art fades.
+private struct LoadedArtworkView: View {
+    let artwork: Artwork
+    @Environment(\.look) private var look
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var image: UIImage?
+
+    init(artwork: Artwork) {
+        self.artwork = artwork
+        _image = State(initialValue: ImageCache.shared.cachedImage(for: artwork))
+    }
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(look.palette.raised)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+                    .transition(.opacity)
+            }
+        }
+        .task {
+            guard image == nil else { return }
+            let loaded = await ImageCache.shared.image(for: artwork)
+            guard !Task.isCancelled, let loaded else { return }
+            withAnimation(reduceMotion ? nil : look.animation) {
+                image = loaded
+            }
         }
     }
 }
@@ -61,13 +82,24 @@ final class ImageCache {
     }()
     private var inFlight: [URL: Task<UIImage?, Never>] = [:]
 
+    func cachedImage(for artwork: Artwork) -> UIImage? {
+        switch artwork {
+        case .url(let url): cache.object(forKey: url.absoluteString as NSString)
+        case .image(let id): cache.object(forKey: id as NSString)
+        default: nil
+        }
+    }
+
     func image(for artwork: Artwork) async -> UIImage? {
+        if let cached = cachedImage(for: artwork) { return cached }
         switch artwork {
         case .url(let url):
-            if let cached = cache.object(forKey: url.absoluteString as NSString) { return cached }
             if let task = inFlight[url] { return await task.value }
             let task = Task<UIImage?, Never> {
-                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                let data: Data?
+                if url.isFileURL { data = try? Data(contentsOf: url) }
+                else { data = try? await URLSession.shared.data(from: url).0 }
+                guard let data,
                       let image = await UIImage(data: data)?.byPreparingForDisplay() else { return nil }
                 return image
             }

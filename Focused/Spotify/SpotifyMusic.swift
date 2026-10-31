@@ -31,6 +31,9 @@ final class SpotifyMusic: MusicService {
     private let remoteDelegate = RemoteDelegate()
     private var isActive = true
     private var pollTask: Task<Void, Never>?
+    private var playbackTask: Task<Void, Never>?
+    private var handoffPlaybackTask: Task<Void, Never>?
+    private var handoffPauseTask: Task<Void, Never>?
     private var libraryWakeTask: Task<Void, Never>?
     private var libraryWakeBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var libraryWakeFailure: String?
@@ -48,6 +51,12 @@ final class SpotifyMusic: MusicService {
     /// user's latest action always wins.
     private var playID = 0 {
         didSet {
+            playbackTask?.cancel()
+            playbackTask = nil
+            handoffPlaybackTask?.cancel()
+            handoffPlaybackTask = nil
+            handoffPauseTask?.cancel()
+            handoffPauseTask = nil
             cancelLibraryWake()
             libraryWakeFailure = nil
         }
@@ -217,15 +226,18 @@ final class SpotifyMusic: MusicService {
     /// App Remote reconnect, and finally waking the Spotify app.
     private func playWithFallbacks(_ request: PlayRequest) {
         let id = playID
-        Task {
+        playbackTask = Task {
+            guard !Task.isCancelled, id == playID else { return }
             do {
                 try await sendPlay(request)
+                guard !Task.isCancelled, id == playID else { return }
                 log("play via Web API")
                 refreshSoon()
                 return
             } catch let error as SpotifyAPI.APIError where error.isNoActiveDevice {
                 // Fall through to the next route.
             } catch {
+                guard !Task.isCancelled, id == playID else { return }
                 report(error)
                 return
             }
@@ -259,7 +271,7 @@ final class SpotifyMusic: MusicService {
     /// phone can take a moment to become the active device.
     private func jumpToStart(of request: PlayRequest, id: Int, startedAt: Date) {
         guard request.singleURI == nil else { return }
-        Task {
+        playbackTask = Task {
             // Up to ~10 s: right after a wake the phone can be slow to become
             // the active device, and until this lands the song plays
             // outside its playlist.
@@ -432,11 +444,34 @@ final class SpotifyMusic: MusicService {
         }
     }
 
+    func suspendPlayback() {
+        // A play already accepted by Spotify cannot be recalled by cancelling
+        // its HTTP response. Let it finish, then pause after that command.
+        let pending = playbackTask
+        playbackTask = nil
+        playID += 1
+        if nowPlaying?.isPaused == false { togglePause() }
+        appWillResignActive()
+        handoffPlaybackTask = pending
+        let id = playID
+        handoffPauseTask = Task {
+            await pending?.value
+            guard !Task.isCancelled, id == playID else { return }
+            try? await api.pause()
+        }
+    }
+
+    func endSession() {
+        playID += 1
+        appWillResignActive()
+    }
+
     /// Resume over the Web API, else a quiet reconnect, else wake Spotify
     /// (which resumes its last song). Puts the shown state back if all fail.
     private func resumeWithFallbacks(revertingTo previous: NowPlaying? = nil) {
         let id = playID
-        Task {
+        playbackTask = Task {
+            guard !Task.isCancelled, id == playID else { return }
             do {
                 try await api.resume()
                 refreshSoon()

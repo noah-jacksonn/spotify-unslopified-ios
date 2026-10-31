@@ -69,6 +69,9 @@ protocol MusicService: AnyObject {
     /// Brings the Spotify app up to resume playback, then returns here.
     func openSpotify()
     func togglePause()
+    func suspendPlayback()
+    /// Ends this app's session without pausing music in another app.
+    func endSession()
     func next()
     func previous()
     func seek(toMs position: Int)
@@ -85,6 +88,11 @@ protocol MusicService: AnyObject {
 }
 
 extension MusicService {
+    func endSession() { suspendPlayback() }
+    func suspendPlayback() {
+        if nowPlaying?.isPaused == false { togglePause() }
+        appWillResignActive()
+    }
     func updateCover(_ jpeg: Data, for playlist: Playlist) async throws {
         throw URLError(.unsupportedURL)
     }

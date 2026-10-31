@@ -184,6 +184,18 @@ struct LyricsTests {
         try await waitForLyrics(shared)
         precondition(shared.error == nil && shared.document?.currentText(at: 6) == "Open window")
 
+        let beforeLocal = LyricsStub.requests.count
+        state.trackURI = "suno:local-test"
+        shared.localDocument = { _ in sample }
+        shared.load(for: state)
+        precondition(shared.document?.currentText(at: 1) == "New song" && !shared.isLoading)
+        shared.localDocument = { _ in nil }
+        state.trackURI = "suno:missing-lyrics"
+        shared.load(for: state)
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(shared.document == nil && !shared.isLoading)
+        precondition(LyricsStub.requests.count == beforeLocal, "Private Suno song metadata must not be sent to LRCLIB")
+
         print("Lyrics checks passed: LRC timing, gaps, offsets, repeats, matching, duration, request privacy, cache, plain lyrics, instrumental, missing, retry, malformed response, podcasts, shared presentation state, song changes, live gaps, and retry")
     }
 

@@ -9,6 +9,7 @@ final class AppModel {
     let auth = SpotifyAuth()
     /// Outlives player sheets so closing a song doesn't discard its lyrics.
     let lyrics = LyricsState()
+    let localLibrary = LocalLibrary()
     let sleepTimer: SleepTimer
     private(set) var mode: Mode = .signedOut
     private(set) var music: (any MusicService)?
@@ -59,7 +60,10 @@ final class AppModel {
     init() {
         sleepTimer = SleepTimer(auth: auth)
         sleepTimer.music = { [weak self] in self?.music }
-        sleepTimer.usesSpotify = { [weak self] in self?.mode == .spotify }
+        sleepTimer.usesSpotify = { [weak self] in
+            self?.mode == .spotify && (self?.music as? CombinedMusic)?.usesLocalPlayback != true
+        }
+        lyrics.localDocument = { [weak self] uri in self?.localLibrary.song(uri: uri)?.lyricsDocument }
         auth.onExpired = { [weak self] in
             guard let self, self.mode == .spotify else { return }
             self.signOut()
@@ -105,7 +109,10 @@ final class AppModel {
 
     func startSpotify() { start(SpotifyMusic(auth: auth), mode: .spotify, scope: "spotify") }
 
-    private func start(_ music: any MusicService, mode: Mode, scope: String) {
+    private func start(_ source: any MusicService, mode: Mode, scope: String) {
+        self.music?.endSession()
+        let music = CombinedMusic(remote: source, library: localLibrary)
+        music.onSourceChanged = { [weak self] in self?.sleepTimer.appBecameActive() }
         lyrics.load(for: nil)
         music.onNotice = { [weak self] in self?.show($0) }
         enqueueTask?.cancel()
@@ -134,6 +141,17 @@ final class AppModel {
 
     func show(_ message: String) { show(Notice(text: message)) }
 
+    func deleteImportedPlaylist(_ playlist: ImportedPlaylist) {
+        do {
+            let result = try localLibrary.deletePlaylist(id: playlist.id)
+            if let combined = music as? CombinedMusic,
+               combined.local.queue.contains(where: { result.removedSongs.contains($0.id) }) {
+                combined.stopLocalPlayback()
+            }
+            show(result.cleanupFailures == 0 ? "Deleted \(playlist.name)" : "Playlist deleted. Some audio files couldn't be cleaned up.")
+        } catch { show(error.localizedDescription) }
+    }
+
     func show(_ notice: Notice) {
         self.notice = notice
         noticeTask?.cancel()
@@ -158,7 +176,7 @@ final class AppModel {
         enqueueTask = nil
         pendingQueueRequests = 0
         sleepTimer.cancel()
-        music?.appWillResignActive()
+        music?.endSession()
         if mode == .spotify { auth.signOut() }
         music = nil
         uploadedCovers = [:]

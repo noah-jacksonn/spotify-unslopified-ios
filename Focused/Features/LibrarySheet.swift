@@ -11,8 +11,10 @@ struct LibrarySheet: View {
     @State private var deleting: Playlist?
     @State private var editingCover: Playlist?
     @State private var path = NavigationPath()
+    @State private var showsCreatePlaylist = false
+    @State private var pendingPlaylist: ImportedPlaylistRoute?
 
-    enum Filter: String, CaseIterable { case mine = "By you", all = "All", others = "By others" }
+    enum Filter: String, CaseIterable { case mine = "By you", imported = "Imported", all = "All", others = "By others" }
 
     var body: some View {
         let visible = visible
@@ -20,12 +22,16 @@ struct LibrarySheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: look.gap * 0.7) {
                     filters
+                    if filter == .imported { createPlaylistButton }
+                    ForEach(visibleImported) { playlist in
+                        ImportedPlaylistLibraryRow(playlist: playlist)
+                    }
                     ForEach(visible) { playlist in row(playlist) }
-                    if visible.isEmpty {
-                        if model.libraryState == .loading {
+                    if visible.isEmpty && visibleImported.isEmpty {
+                        if model.libraryState == .loading && filter != .imported {
                             BarsLoader().frame(maxWidth: .infinity).padding(.top, 40)
                         } else {
-                            Text("No playlists here")
+                            Text(filter == .imported ? "Create a playlist for your audio files." : "No playlists here")
                                 .font(look.font(15))
                                 .foregroundStyle(look.palette.muted)
                                 .padding(.top, 20)
@@ -40,9 +46,7 @@ struct LibrarySheet: View {
             .navigationTitle("All playlists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.tint(look.palette.text)
-                }
+                CloseToolbarItem { dismiss() }
             }
             .pageBackground()
             .appDestinations()
@@ -52,12 +56,30 @@ struct LibrarySheet: View {
         .deletePlaylistConfirmation($deleting)
         .playlistCoverEditor($editingCover)
         .presentationBackground(look.palette.background)
+        #if DEBUG
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-openImportedLibrary") { filter = .imported }
+        }
+        #endif
+        .sheet(isPresented: $showsCreatePlaylist, onDismiss: {
+            if let pendingPlaylist { path.append(pendingPlaylist) }
+            pendingPlaylist = nil
+        }) {
+            CreateImportedPlaylistView { pendingPlaylist = ImportedPlaylistRoute(id: $0.id) }
+                .environment(\.look, look)
+        }
+    }
+
+    private var visibleImported: [ImportedPlaylist] {
+        guard filter != .others else { return [] }
+        return model.localLibrary.playlists.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
     }
 
     private var visible: [Playlist] {
         model.playlists.filter { playlist in
             switch filter {
             case .mine: playlist.isMine
+            case .imported: false
             case .others: !playlist.isMine
             case .all: true
             }
@@ -66,20 +88,35 @@ struct LibrarySheet: View {
     }
 
     private var filters: some View {
-        HStack(spacing: 8) {
-            ForEach(Filter.allCases, id: \.self) { option in
-                let selected = option == filter
-                Button { filter = option } label: {
-                    Text(option.rawValue)
-                        .font(look.font(14, selected ? .semibold : .regular))
-                        .foregroundStyle(selected ? look.palette.onAccent : look.palette.text)
-                        .padding(.horizontal, 14)
-                        .frame(height: 34)
-                        .background(selected ? look.palette.accent : look.palette.raised, in: Capsule())
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases, id: \.self) { option in
+                    let selected = option == filter
+                    Button { filter = option } label: {
+                        Text(option.rawValue)
+                            .font(look.font(14, selected ? .semibold : .regular))
+                            .foregroundStyle(selected ? look.palette.onAccent : look.palette.text)
+                            .padding(.horizontal, 14)
+                            .frame(height: 34)
+                            .background(selected ? look.palette.accent : look.palette.raised, in: Capsule())
+                    }
+                    .buttonStyle(PressScale())
                 }
-                .buttonStyle(PressScale())
             }
+            .padding(.vertical, 8)
         }
+        .scrollIndicators(.hidden)
+    }
+
+    private var createPlaylistButton: some View {
+        Button { showsCreatePlaylist = true } label: {
+            Label("Create playlist", systemImage: "plus")
+                .font(look.font(16, .medium))
+                .foregroundStyle(look.palette.text)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .surface(look, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressScale())
         .padding(.vertical, 8)
     }
 
@@ -131,6 +168,45 @@ struct LibrarySheet: View {
             .buttonStyle(PressScale())
             .sensoryFeedback(.selection, trigger: chosen)
             .accessibilityLabel(chosen ? "Remove \(playlist.name) from Home" : "Show \(playlist.name) on Home")
+        }
+    }
+}
+
+private struct ImportedPlaylistLibraryRow: View {
+    let playlist: ImportedPlaylist
+    @Environment(AppModel.self) private var model
+    @Environment(\.look) private var look
+
+    var body: some View {
+        HStack(spacing: 10) {
+            NavigationLink(value: ImportedPlaylistRoute(id: playlist.id)) {
+                HStack(spacing: 14) {
+                    ArtworkView(artwork: model.localLibrary.artwork(for: playlist.id))
+                        .frame(width: 56, height: 56).artClip(look, size: 56)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(playlist.name).font(look.font(16, .medium)).foregroundStyle(look.palette.text).lineLimit(1)
+                        Text("\(model.localLibrary.songs(in: playlist.id).count) songs")
+                            .font(look.font(13)).foregroundStyle(look.palette.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .importedPlaylistActions(playlist)
+            Button {
+                do { try model.localLibrary.setShowsOnHome(!playlist.showsOnHome, playlistID: playlist.id) }
+                catch { model.show(error.localizedDescription) }
+            } label: {
+                Image(systemName: playlist.showsOnHome ? "checkmark" : "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(playlist.showsOnHome ? look.palette.onAccent : look.palette.text)
+                    .frame(width: 26, height: 26)
+                    .background(playlist.showsOnHome ? look.palette.accent : look.palette.raised, in: Circle())
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(PressScale())
+            .accessibilityLabel(playlist.showsOnHome ? "Hide \(playlist.name) from Home" : "Show \(playlist.name) on Home")
         }
     }
 }
