@@ -113,6 +113,17 @@ struct SpotifyAPITests {
         precondition(tracks.count == 1 && tracks[0].isPlayable == false)
         precondition(tracks[0].position == 1 && tracks[0].recordingID == "RECORDING",
                      "Preserve restricted source metadata and Spotify positions while hiding local files")
+        SpotifyStub.body = try JSONSerialization.data(withJSONObject: ["items": [
+            ["item": restricted, "added_at": "2026-10-01T10:00:00Z"],
+            ["item": local, "added_at": "2026-12-01T10:00:00Z"],
+            ["item": restricted, "added_at": "2026-11-06T10:00:00.000Z"],
+            ["item": restricted, "added_at": NSNull()],
+            ["item": restricted, "added_at": "2026-11-06T10:00:00Z"],
+            ["item": restricted, "added_at": "invalid"],
+        ]])
+        let recentTracks = try await api.tracks(inPlaylist: "source")
+        precondition(recentTracks.compactMap(\.position) == [2,4,0,3,5],
+                     "Newest additions first, stable ties, unknown dates last, preserving original positions and duplicates")
         SpotifyStub.body = try JSONSerialization.data(withJSONObject: ["currently_playing": restricted, "queue": [restricted]])
         let queue = try await api.playbackQueue()
         precondition(queue.current?.uri == tracks[0].uri && queue.upcoming.count == 1,

@@ -28,8 +28,11 @@ struct LibrarySheet: View {
                     }
                     ForEach(visibleImported) { playlist in
                         ImportedPlaylistLibraryRow(playlist: playlist)
+                            .playlistReorder(id: "imported:" + playlist.id, among: visibleImported.map { "imported:" + $0.id })
                     }
-                    ForEach(visible) { playlist in row(playlist) }
+                    ForEach(visible) { playlist in
+                        row(playlist).playlistReorder(id: "spotify:" + playlist.id, among: visible.map { "spotify:" + $0.id })
+                    }
                     if visible.isEmpty && visibleImported.isEmpty {
                         if model.libraryState == .loading && filter != .imported {
                             BarsLoader().frame(maxWidth: .infinity).padding(.top, 40)
@@ -75,11 +78,11 @@ struct LibrarySheet: View {
 
     private var visibleImported: [ImportedPlaylist] {
         guard filter != .others else { return [] }
-        return model.localLibrary.playlists.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        return model.playlistOrder.sorted(model.localLibrary.playlists.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }, id: { "imported:" + $0.id })
     }
 
     private var visible: [Playlist] {
-        model.playlists.filter { playlist in
+        model.playlistOrder.sorted(model.playlists.filter { playlist in
             switch filter {
             case .mine: playlist.isMine
             case .imported: false
@@ -87,7 +90,7 @@ struct LibrarySheet: View {
             case .all: true
             }
         }
-        .filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        .filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }, id: { "spotify:" + $0.id })
     }
 
     private var filters: some View {

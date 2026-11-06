@@ -7,6 +7,7 @@ struct FocusedApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .scrollIndicators(.hidden)
                 .environment(model)
                 .onOpenURL { url in
                     model.music?.handle(url: url)

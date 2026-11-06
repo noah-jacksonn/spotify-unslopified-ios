@@ -58,9 +58,20 @@ struct SpotifyAPI {
         ]))
         // Position = index among all entries, including local files and
         // unavailable (null) ones the app hides, as Spotify counts them.
-        return items.enumerated().compactMap { index, item in
-            item?.entry?.model.map { var track = $0; track.position = index; return track }
-        }
+        let timestamp = ISO8601DateFormatter()
+        let fractionalTimestamp = ISO8601DateFormatter()
+        fractionalTimestamp.formatOptions.insert(.withFractionalSeconds)
+        return items.enumerated().compactMap { index, item -> (track: Track, added: Date)? in
+            guard var track = item?.entry?.model else { return nil }
+            track.position = index
+            let added = item?.added_at.flatMap { timestamp.date(from: $0) ?? fractionalTimestamp.date(from: $0) }
+            return (track, added ?? .distantPast)
+        }.sorted {
+            // Keep original Spotify positions for playback and removal, even
+            // though the display starts with the most recently added songs.
+            // Enqueueing the playlist follows this same displayed order.
+            $0.added == $1.added ? $0.track.position! < $1.track.position! : $0.added > $1.added
+        }.map(\.track)
     }
 
     /// Removes items (here, playlists) from the user's library. For a
@@ -394,6 +405,7 @@ private struct PlaylistDTO: Decodable {
 }
 
 private struct PlaylistItemDTO: Decodable {
+    var added_at: String?
     var item: TrackDTO?
     var track: TrackDTO?
     var entry: TrackDTO? { item ?? track }

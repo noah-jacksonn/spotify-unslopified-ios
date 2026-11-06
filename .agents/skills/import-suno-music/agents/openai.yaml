@@ -1,0 +1,4 @@
+interface:
+  display_name: "Import Suno Music"
+  short_description: "Import new Suno songs into your shared music library"
+  default_prompt: "Use $import-suno-music to import my new liked Suno songs into my shared music library."

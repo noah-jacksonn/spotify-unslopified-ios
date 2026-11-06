@@ -509,7 +509,7 @@ struct DebugSegtestPanel<Rows: View>: View {
                     }
             }
             .scrollBounceBehavior(.basedOnSize)
-            .scrollIndicators(.automatic)
+            .scrollIndicators(.hidden)
             .frame(height: visibleRowsHeight)
             footer
         }

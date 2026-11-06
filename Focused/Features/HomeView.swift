@@ -33,13 +33,6 @@ struct HomeView: View {
                     Group {
                         VStack(spacing: look.gap) {
                             content
-                            ForEach(model.localLibrary.homePlaylists.filter { playlist in
-                                playlist.id != ImportedPlaylist.legacyID || !model.homePlaylists.contains {
-                                    $0.name.caseInsensitiveCompare("End of 2026") == .orderedSame
-                                }
-                            }) { playlist in
-                                ImportedPlaylistHomeEntry(playlist: playlist).padding(.horizontal, look.margin)
-                            }
                         }
                         VStack(spacing: 12) {
                             if !model.homePlaylists.isEmpty || !model.localLibrary.playlists.isEmpty { allPlaylistsButton }
@@ -240,21 +233,19 @@ struct HomeView: View {
     @ViewBuilder
     private var content: some View {
         if isLoading {
-            // Only before anything has loaded; a refresh keeps the list up.
-            if !model.home.ids.isEmpty || model.localLibrary.homePlaylists.isEmpty {
+            if !model.home.ids.isEmpty || model.orderedHomePlaylists.isEmpty {
                 HomeLoadingView(playlistCount: max(1, model.home.ids.count))
             }
         } else if case .failed(let message) = model.libraryState {
             emptyState(title: "Couldn't load your playlists", detail: message, action: "Try again") {
                 Task { await model.loadLibrary() }
             }
-        } else if model.homePlaylists.isEmpty {
-            if model.localLibrary.homePlaylists.isEmpty {
-                emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
-                           action: "Choose playlists") { showsLibrary = true }
-            }
-        } else {
-            PlaylistList(playlists: model.homePlaylists)
+        } else if model.orderedHomePlaylists.isEmpty {
+            emptyState(title: "Home is empty", detail: "Choose the playlists you want here. Nothing else shows up.",
+                       action: "Choose playlists") { showsLibrary = true }
+        }
+        if !model.orderedHomePlaylists.isEmpty {
+            PlaylistList(playlists: model.orderedHomePlaylists)
         }
     }
 
@@ -316,7 +307,7 @@ struct HomeView: View {
 /// extension's Home. Swipe right to play, left to shuffle; long-press for
 /// Play, Move to top, Remove from Home.
 private struct PlaylistList: View {
-    var playlists: [Playlist]
+    var playlists: [HomePlaylist]
     @Environment(AppModel.self) private var model
     @Environment(\.look) private var look
     @State private var deleting: Playlist?
@@ -324,40 +315,50 @@ private struct PlaylistList: View {
 
     var body: some View {
         VStack(spacing: look.gap) {
-            ForEach(playlists) { playlist in
-                NavigationLink(value: playlist) {
-                    row(playlist).contentShape(Rectangle())
-                }
-                .buttonStyle(PressScale())
-                .contextMenu {
-                    if playlist.isMine {
-                        Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
-                    }
-                    Button("Play", systemImage: "play.fill") { model.music?.play(.context(uri: playlist.uri)) }
-                    Button("Move to top", systemImage: "arrow.up.to.line") { model.home.moveToTop(playlist) }
-                    Button("Remove from Home", systemImage: "minus.circle") { model.home.remove(playlist) }
-                    if playlist.isOwned {
-                        Button("Change cover", systemImage: "photo") { editingCover = playlist }
-                    }
-                    Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
-                        deleting = playlist
+            ForEach(playlists) { entry in
+                Group {
+                    switch entry {
+                    case .imported(let playlist):
+                        ImportedPlaylistHomeEntry(playlist: playlist)
+                    case .spotify(let playlist):
+                        spotifyRow(playlist)
                     }
                 }
-                .rowSwipes(
-                    leading: RowSwipe(systemName: "play.fill", label: "Play") {
-                        model.music?.play(.context(uri: playlist.uri))
-                    },
-                    trailing: RowSwipe(systemName: "shuffle", label: "Shuffle") { shuffle(playlist) }
-                )
-                if playlist.name.caseInsensitiveCompare("End of 2026") == .orderedSame,
-                   let imported = model.localLibrary.homePlaylists.first(where: { $0.id == ImportedPlaylist.legacyID }) {
-                    ImportedPlaylistHomeEntry(playlist: imported)
-                }
+                .playlistReorder(id: entry.id, among: playlists.map(\.id))
             }
         }
         .deletePlaylistConfirmation($deleting)
         .playlistCoverEditor($editingCover)
         .padding(.horizontal, look.margin)
+    }
+
+    private func spotifyRow(_ playlist: Playlist) -> some View {
+        NavigationLink(value: playlist) {
+            row(playlist).contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .contextMenu {
+            if playlist.isMine {
+                Button("Add to queue", systemImage: "text.badge.plus") { model.enqueue(playlist) }
+            }
+            Button("Play", systemImage: "play.fill") { model.music?.play(.context(uri: playlist.uri)) }
+            Button("Move to top", systemImage: "arrow.up.to.line") {
+                if let first = playlists.first { model.playlistOrder.move("spotify:" + playlist.id, to: first.id, among: playlists.map(\.id)) }
+            }
+            Button("Remove from Home", systemImage: "minus.circle") { model.home.remove(playlist) }
+            if playlist.isOwned {
+                Button("Change cover", systemImage: "photo") { editingCover = playlist }
+            }
+            Button(playlist.isOwned ? "Delete playlist" : "Remove from library", systemImage: "trash", role: .destructive) {
+                deleting = playlist
+            }
+        }
+        .rowSwipes(
+            leading: RowSwipe(systemName: "play.fill", label: "Play") {
+                model.music?.play(.context(uri: playlist.uri))
+            },
+            trailing: RowSwipe(systemName: "shuffle", label: "Shuffle") { shuffle(playlist) }
+        )
     }
 
     /// Starts at a random song, as the playlist page's Shuffle does. Home

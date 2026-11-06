@@ -34,26 +34,25 @@ struct ImportedPlaylistView: View {
     @Environment(\.look) private var look
     @State private var showsImporter = false
     @State private var showsFilters = false
-    @State private var filtersDate = false
+    @State private var filter: SongFilter
+    @State private var showsCount = false
+    @State private var customCount = "20"
     @State private var fromDate = Calendar.current.startOfDay(for: Date())
     @State private var throughDate = Date()
     @State private var editing: LocalSong?
     @State private var importError: String?
     @State private var editsCover = false
 
+    init(playlistID: String) {
+        self.playlistID = playlistID
+        _filter = State(initialValue: SongFilter.load(for: playlistID))
+    }
+
     private var playlist: ImportedPlaylist? { model.localLibrary.playlist(id: playlistID) }
     private var title: String { playlist?.name ?? "Imported playlist" }
 
     private var songs: [LocalSong] {
-        let all = model.localLibrary.songs(in: playlistID)
-        guard filtersDate else { return all }
-        let start = Calendar.current.startOfDay(for: fromDate)
-        let end = Calendar.current.date(byAdding: .day, value: 1,
-            to: Calendar.current.startOfDay(for: throughDate)) ?? throughDate
-        return all.filter { song in
-            guard let date = song.createdAt else { return false }
-            return date >= start && date < end
-        }
+        filter.apply(model.localLibrary.songs(in: playlistID), created: \.createdAt, imported: { $0.importedAt })
     }
 
     var body: some View {
@@ -76,14 +75,7 @@ struct ImportedPlaylistView: View {
                     }
                     .disabled(songs.isEmpty)
                     Spacer()
-                    Button { showsFilters = true } label: {
-                        Image(systemName: "calendar")
-                            .font(look.font(20)).frame(width: 44, height: 44)
-                            .foregroundStyle(filtersDate ? look.palette.accent : look.palette.muted)
-                    }
-                    .accessibilityLabel("Filter by date")
-                    .accessibilityValue(filtersDate ? "Active" : "All dates")
-                    .accessibilityIdentifier("suno.dateFilter")
+                    filterMenu
                 }
                 if model.localLibrary.isImporting {
                     HStack { ProgressView(); Text("Importing songs…").font(look.font(15)) }
@@ -93,10 +85,10 @@ struct ImportedPlaylistView: View {
                     Button("Try again") { model.localLibrary.reload() }
                 }
                 if songs.isEmpty && !model.localLibrary.isImporting {
-                    ContentUnavailableView(filtersDate ? "No songs in this date range" : "No songs yet",
+                    ContentUnavailableView(filter != .all ? "No matching songs" : "No songs yet",
                         systemImage: "music.note",
-                        description: Text(filtersDate ? "Choose another range or clear the filter." : "Import downloaded songs to listen offline."))
-                    if filtersDate { Button("Clear filter") { filtersDate = false } }
+                        description: Text(filter != .all ? "Choose another selection or show all songs." : "Import downloaded songs to listen offline."))
+                    if filter != .all { Button("All songs") { filter = .all } }
                     else {
                         Button("Import songs", systemImage: "plus") { showsImporter = true }
                             .font(look.font(16, .medium))
@@ -119,6 +111,7 @@ struct ImportedPlaylistView: View {
             .padding(look.margin)
         }
         .refreshable { model.localLibrary.reload() }
+        .onChange(of: filter) { _, selection in selection.save(for: playlistID) }
         .pageBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -143,19 +136,26 @@ struct ImportedPlaylistView: View {
         .sheet(isPresented: $showsFilters) {
             NavigationStack {
                 Form {
-                    Toggle("Filter by creation date", isOn: $filtersDate)
-                    if filtersDate {
-                        DatePicker("From", selection: $fromDate, in: ...throughDate, displayedComponents: .date)
-                        DatePicker("Through", selection: $throughDate, in: fromDate..., displayedComponents: .date)
-                        Text("Songs with an unknown creation date are excluded.").font(.footnote)
-                    }
-                    Button("Clear filter") { filtersDate = false }
+                    DatePicker("From", selection: $fromDate, in: ...throughDate, displayedComponents: .date)
+                    DatePicker("Through", selection: $throughDate, in: fromDate..., displayedComponents: .date)
                 }
-                .navigationTitle("Date filter")
+                .font(look.font(16))
+                .navigationTitle("Custom dates")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { CloseToolbarItem { showsFilters = false } }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showsFilters = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Apply") { filter = .dates(fromDate, throughDate); showsFilters = false }
+                    }
+                }
             }
             .presentationDetents([.medium])
+        }
+        .alert("Latest songs", isPresented: $showsCount) {
+            TextField("Number of songs", text: $customCount).keyboardType(.numberPad)
+            Button("Cancel", role: .cancel) { }
+            Button("Apply") { if let count = Int(customCount), count > 0 { filter = .latest(count) } }
+                .disabled((Int(customCount) ?? 0) < 1)
         }
         .sheet(item: $editing) { song in
             ImportedSongEditor(song: song).environment(\.look, look)
@@ -170,6 +170,49 @@ struct ImportedPlaylistView: View {
         .alert("Import incomplete", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK") { importError = nil }
         } message: { Text(importError ?? "") }
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            filterOption("All songs", .all)
+            Section("Most recent") {
+                filterOption("Latest 5", .latest(5))
+                filterOption("Latest 10", .latest(10))
+                Button("Custom count…") {
+                    if case .latest(let count) = filter { customCount = String(count) }
+                    showsCount = true
+                }
+            }
+            Section("Created") {
+                filterOption("Past week", .days(7))
+                filterOption("Past 30 days", .days(30))
+                filterOption("Past 90 days", .days(90))
+                Button("Custom dates…") {
+                    if case .dates(let from, let through) = filter { fromDate = from; throughDate = through }
+                    showsFilters = true
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(filter.label)
+                Image(systemName: "chevron.down").font(look.font(10, .semibold))
+            }
+            .font(look.font(14, .medium))
+            .foregroundStyle(filter == .all ? look.palette.muted : look.palette.accent)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .surface(look, in: Capsule())
+        }
+        .accessibilityLabel("Filter songs")
+        .accessibilityValue(filter.label)
+        .accessibilityIdentifier("suno.dateFilter")
+    }
+
+    private func filterOption(_ title: String, _ selection: SongFilter) -> some View {
+        Button { filter = selection } label: {
+            if filter == selection { Label(title, systemImage: "checkmark") }
+            else { Text(title) }
+        }
     }
 }
 
@@ -199,9 +242,6 @@ private struct ImportedSongEditor: View {
                     Button("Change artwork", systemImage: "photo") { editsCover = true }
                     TextField("Title", text: $song.title)
                     TextField("Artist", text: $song.artist)
-                    if song.sharedDirectory != nil {
-                        TextField("Track order", value: $song.sharedOrder, format: .number).keyboardType(.decimalPad)
-                    }
                     TextField("Source link", text: $source).keyboardType(.URL).textInputAutocapitalization(.never)
                     Toggle("Creation date known", isOn: $hasDate)
                     if hasDate { DatePicker("Created", selection: $date, displayedComponents: .date) }

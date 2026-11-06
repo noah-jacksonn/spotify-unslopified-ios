@@ -18,6 +18,7 @@ final class AppModel {
     private(set) var dailyFive: DailyFive?
     private(set) var dailyFiveError: String?
     private(set) var home = HomeSelection(scope: "spotify")
+    private(set) var playlistOrder = PlaylistOrder(scope: "spotify")
     var signInError: String?
     /// A short message shown over every screen (`noticeOverlay`), then
     /// cleared after a few seconds.
@@ -88,6 +89,20 @@ final class AppModel {
         home.ids.compactMap { id in playlists.first { $0.id == id } }
     }
 
+    var orderedHomePlaylists: [HomePlaylist] {
+        var entries: [HomePlaylist] = []
+        var imported = localLibrary.homePlaylists
+        for playlist in homePlaylists {
+            entries.append(.spotify(playlist))
+            if playlist.name.caseInsensitiveCompare("End of 2026") == .orderedSame,
+               let index = imported.firstIndex(where: { $0.id == ImportedPlaylist.legacyID }) {
+                entries.append(.imported(imported.remove(at: index)))
+            }
+        }
+        entries += imported.map(HomePlaylist.imported)
+        return playlistOrder.sorted(entries, id: \.id)
+    }
+
     // MARK: Sessions
 
     func signIn(callback: URL) async {
@@ -126,6 +141,7 @@ final class AppModel {
         uploadedCovers = [:]
         savingCoverIDs = []
         home = HomeSelection(scope: scope)
+        playlistOrder = PlaylistOrder(scope: scope)
         self.mode = mode
         playlists = []
         libraryState = .idle
@@ -406,5 +422,17 @@ final class HomeSelection {
 
     private func save() {
         UserDefaults.standard.set(ids, forKey: key)
+    }
+}
+
+enum HomePlaylist: Identifiable {
+    case spotify(Playlist)
+    case imported(ImportedPlaylist)
+
+    var id: String {
+        switch self {
+        case .spotify(let playlist): "spotify:\(playlist.id)"
+        case .imported(let playlist): "imported:\(playlist.id)"
+        }
     }
 }
